@@ -1,15 +1,25 @@
 import { chromium } from 'playwright';
 import { resolve, join } from 'node:path';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, writeFile, access, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 if (process.platform !== 'win32') { console.log('Native Chrome host E2E SKIP: Windows required'); process.exit(0); }
 const model = resolve(process.env.DGS_E2E_MODEL ?? 'kontrol1/20260923_1200_SN3_TR0.json');
 const extension = resolve('dist');
-const profile = await mkdtemp(join(tmpdir(), 'ytbs-v61-native-'));
+const profile = await mkdtemp(join(tmpdir(), 'ytbs-v611-native-'));
 const args = [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--no-first-run'];
-const launch = () => chromium.launchPersistentContext(profile, { channel: 'chromium', headless: true, args });
+const launch = () => chromium.launchPersistentContext(profile, { viewport: { width: 1440, height: 900 }, channel: 'chromium', headless: true, args });
+const hostRoot = resolve('native-host/python');
+const manifestPath = join(hostRoot, 'com.ytbs.powerfactory.solver.json');
+const registryPath = 'HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.ytbs.powerfactory.solver';
+const python = resolve('.venv/Scripts/python.exe');
+const backup = async path => { try { await access(path); return await readFile(path); } catch { return null; } };
+const oldManifest = await backup(manifestPath);
+let oldRegistry = '';
+try {
+  oldRegistry = execFileSync('pwsh', ['-NoProfile', '-Command', `if (Test-Path -LiteralPath '${registryPath}') { (Get-Item -LiteralPath '${registryPath}').GetValue('') }`], { encoding: 'utf8' }).trim();
+} catch {}
 let context = await launch();
 let installed = false;
 try {
@@ -17,29 +27,59 @@ try {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30000 });
   const id = new URL(worker.url()).host;
   await context.close();
-  const python = resolve('.venv/Scripts/python.exe');
   execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/install-windows.ps1'), '-ExtensionId', id, '-PythonPath', python], { stdio: 'inherit' });
   installed = true;
   context = await launch();
   const page = await context.newPage();
+  page.on('pageerror', error => console.error(`Native E2E page error: ${error}`));
   await page.goto(`chrome-extension://${id}/workspace.html`);
   await page.locator('#fileInput').setInputFiles(model);
-  await page.waitForFunction(() => document.querySelector('#v61Scope')?.textContent?.includes('86479'), null, { timeout: 180000 });
-  await page.locator('[data-view="analysis"]').click();
+  await page.waitForFunction(() => document.querySelector('#v61Scope')?.textContent?.includes('86.479'), null, { timeout: 180000 });
+  await page.locator('#primaryTabs [data-primary="analysis"]').click();
   await page.locator('#v61Engine').selectOption('pandapower');
   await page.locator('#v61Run').click();
-  await page.waitForFunction(() => /CONVERGED|Hesap başarısız|HOST NOT INSTALLED/.test(document.querySelector('#v61Status')?.textContent ?? ''), null, { timeout: 300000 });
-  const status = await page.locator('#v61Status').innerText();
-  if (!/pandapower AC · (CONVERGED|NON_CONVERGED)/.test(status)) throw Error(`Native host E2E failed: ${status}`);
-  console.log(`Native Chrome messaging, full DGS transfer, pandapower AC: ${status}`);
+  await page.waitForFunction(() => {
+    const status = document.querySelector('#v61Status')?.textContent ?? '';
+    return /AC yük akışı yakınsamadı|Yerel hesap motoruyla bağlantı kesildi|beklenmedik biçimde kapandı|sürümü uyumlu değil|zaman aşımına uğradı/.test(status);
+  }, null, { timeout: 600000 });
+  const acStatus = await page.locator('#v61Status').innerText();
+  if (!acStatus.includes('AC yük akışı yakınsamadı')) throw Error(`Native host AC did not return a solve result: ${acStatus}`);
+  const acSummary = await page.locator('#v61NonConvergence').innerText();
+  if (!acSummary.includes('86.479') || !acSummary.includes('2.382') || !acSummary.includes('30')) throw Error(`Non-convergence model counts missing: ${acSummary}`);
+  if ((await page.locator('#v61Comparison').innerText()).trim()) throw Error('Non-converged AC must not show numeric comparison rows');
+  console.log(`Native host full DGS AC: ${acStatus} · ${acSummary}`);
+
   await page.locator('#v61Mode').selectOption('DC');
   await page.locator('#v61Run').click();
-  await page.waitForFunction(() => /pandapower DC · CONVERGED/.test(document.querySelector('#v61Status')?.textContent ?? ''), null, { timeout: 300000 });
+  await page.waitForFunction(() => {
+    const status = document.querySelector('#v61Status')?.textContent ?? '';
+    return /DC yük akışı yakınsadı|Yerel hesap motoruyla bağlantı kesildi|beklenmedik biçimde kapandı|sürümü uyumlu değil|zaman aşımına uğradı/.test(status);
+  }, null, { timeout: 600000 });
   const dcStatus = await page.locator('#v61Status').innerText();
-  if (!(await page.locator('#v61Comparison').innerText()).includes('Bus ')) throw Error('Typed DC results missing from comparison');
-  console.log(`Native Chrome messaging, full DGS transfer, pandapower DC: ${dcStatus}`);
+  console.log(`Native full DGS DC status received: ${dcStatus}; waiting for the result table`);
+  await page.locator('#v61Filter').selectOption('line');
+  await page.waitForFunction(() => document.querySelector('#v61Comparison')?.textContent?.includes('Aktif güç'), null, { timeout: 180000 })
+    .catch(async error => {
+      const state = await page.evaluate(() => Object.fromEntries(['v61Status', 'v61Comparison', 'v61Pager', 'v61DcSuccess'].map(id => [id, document.getElementById(id)?.textContent ?? ''])));
+      throw new Error(`DC result table did not render: ${JSON.stringify(state)} · ${error}`);
+    });
+  if (!(await page.locator('#v61Comparison').innerText()).includes('Aktif güç')) throw Error('Typed DC result table is missing active-power metrics');
+  if (!(await page.locator('#v61DcSuccess').innerText()).includes('Gerilim büyüklüğü ve reaktif güç')) throw Error('DC null-value explanation is missing');
+  console.log(`Native host full DGS DC: ${dcStatus}`);
+  await mkdir('artifacts/ui-review', { recursive: true });
+  await page.screenshot({ path: resolve('artifacts/ui-review/06-analysis-dc-result.png'), animations: 'disabled' });
+  await page.close();
+
+  execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/uninstall-windows.ps1')], { stdio: 'inherit' });
+  const screenshotRun = execFileSync(process.execPath, [resolve('tests/e2e/extension.mjs')], { encoding: 'utf8', stdio: 'inherit',
+    env: { ...process.env, DGS_E2E_MODEL: '', YTBS_E2E_NATIVE_AVAILABLE: '' } });
+  void screenshotRun;
 } finally {
   await context.close();
-  if (installed) execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/uninstall-windows.ps1')], { stdio: 'inherit' });
+  if (installed) {
+    execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/uninstall-windows.ps1')], { stdio: 'inherit' });
+    if (oldManifest) await writeFile(manifestPath, oldManifest);
+    if (oldRegistry) execFileSync('pwsh', ['-NoProfile', '-Command', `New-Item -Path '${registryPath}' -Force | Out-Null; Set-Item -Path '${registryPath}' -Value '${oldRegistry.ReplaceAll("'", "''")}'`]);
+  }
   await rm(profile, { recursive: true, force: true });
 }

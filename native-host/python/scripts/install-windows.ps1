@@ -8,14 +8,13 @@ $venvPython = if ($PythonPath) { (Resolve-Path -LiteralPath $PythonPath).Path } 
 if (-not $PythonPath -and -not (Test-Path -LiteralPath $venvPython)) { python -m venv (Join-Path $hostRoot '.venv') }
 & $venvPython -m pip install --disable-pip-version-check -e $hostRoot
 if ($LASTEXITCODE -ne 0) { throw 'Native host Python installation failed' }
-$launcher = Join-Path $hostRoot 'ytbs-solver-host.cmd'
+$hostExecutable = Join-Path (Split-Path -Parent $venvPython) 'ytbs-solver-host.exe'
+if (-not (Test-Path -LiteralPath $hostExecutable)) { throw "Native host executable was not created: $hostExecutable" }
 $manifest = Join-Path $hostRoot 'com.ytbs.powerfactory.solver.json'
-$launcherBody = "@echo off`r`n`"$venvPython`" -m ytbs_solver_host.main`r`n"
-[System.IO.File]::WriteAllText($launcher, $launcherBody, [System.Text.Encoding]::ASCII)
 $payload = [ordered]@{
   name = 'com.ytbs.powerfactory.solver'
   description = 'YTBS local pandapower load flow solver'
-  path = $launcher
+  path = $hostExecutable
   type = 'stdio'
   allowed_origins = @("chrome-extension://$ExtensionId/")
 }

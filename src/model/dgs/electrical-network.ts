@@ -8,7 +8,7 @@ import { mapGenerators, mapExternalGrids } from './generator-mapper.ts';
 import { mapLoads } from './load-mapper.ts';
 import { mapShunts } from './shunt-mapper.ts';
 import { mapSwitches, mapSeriesCompensators } from './topology-mapper.ts';
-import { CAPABILITY_MATRIX, mapControls } from './controls-mapper.ts';
+import { ENGINE_CAPABILITIES, mapControls, modelCoverage } from './controls-mapper.ts';
 
 export function mapElectricalNetwork(document: DgsDocument, modelId: string, modelHash: string): ElectricalCanonicalNetwork {
   const ctx = new DgsContext(document);
@@ -17,8 +17,9 @@ export function mapElectricalNetwork(document: DgsDocument, modelId: string, mod
   const lines = mapLines(ctx, busKv), transformers = mapTransformers(ctx);
   const generators = mapGenerators(ctx), loads = mapLoads(ctx), shunts = mapShunts(ctx);
   const seriesCompensators = mapSeriesCompensators(ctx), externalGrids = mapExternalGrids(ctx), switches = mapSwitches(ctx);
-  const controls = mapControls(generators, transformers, shunts);
+  const controls = mapControls(ctx, generators, transformers, shunts);
+  const coverage = modelCoverage(generators, transformers, controls);
   const incomplete = ctx.incompleteCount > 0;
   return { modelId, modelHash, scope: 'FULL', completeness: incomplete ? 'PARTIAL' : 'COMPLETE', buses, lines, transformers, generators, loads, shunts, seriesCompensators, externalGrids, switches, controls,
-    findings: ctx.findings, findingCounts: ctx.findingCounts, capabilityMatrix: { ...CAPABILITY_MATRIX } };
+    findings: ctx.findings, findingCounts: ctx.findingCounts, engineCapabilities: { ...ENGINE_CAPABILITIES }, modelCoverage: coverage };
 }
