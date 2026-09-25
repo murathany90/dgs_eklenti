@@ -1,0 +1,29 @@
+
+#v51Toolbar{margin:7px 0 11px;border:1px solid #3b5971;background:#182e42;border-radius:11px;padding:9px 12px}
+#v51Toolbar .v51MainRow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#v51Toolbar label{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#c7dce7}#v51Toolbar input[type=number]{width:72px;padding:7px;background:#122335;color:#ecf7fc;border:1px solid #47637a;border-radius:6px}
+#v51Toolbar select{padding:7px;color:#eef7fc;min-width:105px}#v51Toolbar button{padding:7px 11px;font-size:12px;border-radius:7px}
+#v51Toolbar .active,#v51AnalysisTabs .active{background:#2d778b;border-color:#78c7d6;color:white}#v51Toolbar button:disabled{opacity:.4;cursor:not-allowed}
+.v51StateRow{margin-top:7px;display:flex;gap:15px;justify-content:space-between;color:#a6d4e2;font-size:11px;flex-wrap:wrap}.v51Impact{margin:8px 0;padding:11px!important}.v51ImpactHeading{display:flex;justify-content:space-between;align-items:center}.v51ImpactKpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:10px 0}.v51ImpactKpis>div{background:#10263a;border:1px solid #38556b;border-radius:8px;padding:12px}.v51ImpactKpis b{display:block;font-size:22px;color:#bfe4ec}.v51ImpactKpis small{display:block;font-size:11px;color:#9bb8c9}.v51TableWrap{overflow:auto;max-height:390px;margin:10px 0}.v51TableWrap table{width:100%;border-collapse:collapse;font-size:12px}.v51TableWrap th{position:sticky;top:0;background:#263f52;z-index:1}.v51TableWrap td,.v51TableWrap th{border:1px solid #334c61;padding:7px;text-align:left}.v51StatusWarn{background:#1f3b4f;border-left:3px solid #dfb75d;padding:9px;border-radius:6px;font-size:12px}
+#v51Impact[hidden],#v51Split[hidden],#v51StationPage:disabled{display:none!important}.v51SplitHead{padding:6px 10px;background:#244358;color:#bee4f1}.v51SplitPlanes{display:grid;grid-template-columns:1fr 1fr;gap:5px}.v51SplitPlanes>div{position:relative;min-width:0}.v51SplitPlanes canvas{width:100%;height:260px;background:#10283b;border:1px solid #39586c;border-radius:6px;display:block}.v51SplitLabel{position:absolute;top:9px;left:9px;font-size:11px;background:#172c3be8;padding:4px 7px;color:white;border-radius:4px}#v51Split{border:1px solid #38576b;margin-top:10px;border-radius:9px;overflow:hidden;padding:4px}
+.v51Analysis{margin:5px 0 14px}.v51Analysis>header{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}.v51Analysis h3{margin:0 0 8px}#v51AnalysisState{font-size:12px;color:#a0d8e7}#v51AnalysisTabs{display:flex;gap:7px;flex-wrap:wrap;margin:8px 0 15px}#v51AnalysisTabs button{font-size:12px;padding:9px 11px;border-radius:7px}.v51Link{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left!important}
+.v51SldBar{display:flex;align-items:end;gap:10px;flex-wrap:wrap;padding:10px 12px;border:1px solid #42627a;border-radius:8px;background:#1d364a;margin-bottom:9px}.v51SldBar label{display:grid;gap:5px;font-size:11px;color:#a7c9d9}.v51SldBar select{min-width:150px}.v51SldBar .mini{flex:1;min-width:250px}
+#view-sld #schemeWrap{height:min(68vh,790px);min-height:480px;overflow:auto}#view-map #mapWrap{height:clamp(460px,calc(100dvh - 255px),1050px)}
+@media(max-width:800px){.v51ImpactKpis{grid-template-columns:repeat(2,minmax(0,1fr))}.v51SplitPlanes{grid-template-columns:1fr}.v51SplitPlanes canvas{height:200px}#v51Toolbar .v51MainRow{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}#v51Toolbar .v51MainRow>*{flex-shrink:0}.v51SldBar{gap:6px}#view-sld #schemeWrap{height:57vh}}
+@media(prefers-reduced-motion:reduce){#v51Toolbar *,#v51Split *{transition:none!important;animation:none!important}}
+/* v5.1: Etki özeti harita alanını aşağı itmeyen, kapatılabilir araç çekmecesidir. */
+#v51Impact{position:fixed;z-index:35;top:205px;right:18px;width:min(560px,calc(100vw - 34px));max-height:calc(100dvh - 225px);overflow:auto;box-shadow:0 16px 48px #020b15cc;border:1px solid #5e839b}
+#v51Impact .v51ImpactKpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+#v51Impact .v51TableWrap{max-height:190px}
+@media(max-width:800px){#v51Impact{top:105px;right:8px;width:calc(100vw - 16px);max-height:calc(100dvh - 115px)}}
+
+/* v5.1: ⚡ scenario comparisons share the same validated result sets as the map. */
+#v42LightningPanel [hidden]{display:none!important}
+#v51LightningDeltaBody{flex:1;min-height:0;overflow:auto;padding:10px}
+#v51LightningDeltaBody .v51LightningDeltaHead{display:grid;grid-template-columns:1fr 82px;gap:8px;margin-bottom:8px}
+#v51LightningDeltaBody .v51LightningDeltaHead label{font-size:11px;color:#bcd5e2}
+#v51LightningDeltaBody .v51LightningDeltaHead input,#v51LightningDeltaBody .v51LightningDeltaHead select{width:100%;box-sizing:border-box;margin-top:4px;padding:6px;background:#102838;color:#d6f0fb;border:1px solid #436378;border-radius:5px}
+#v51LightningDeltaBody #v51LightningDeltaStatus{margin-bottom:8px}
+#v51LightningDeltaBody table{font-size:11px;width:100%;border-collapse:collapse}
+#v51LightningDeltaBody th,#v51LightningDeltaBody td{padding:5px;border-bottom:1px solid #405368;text-align:left}
+#v51LightningDeltaBody .v51Link{font-size:11px;max-width:140px;white-space:normal;text-align:left}

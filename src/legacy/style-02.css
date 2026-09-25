@@ -1,0 +1,33 @@
+
+/* v4.3: map drawer + 36kV group + badges */
+.v43GroupWrap{display:inline-flex;align-items:center;gap:6px}
+.v42Volt.v43Group{border-color:#7fd6c9!important;background:#143f3c!important}
+#v43Drawer{position:absolute;left:12px;bottom:12px;top:auto;width:min(430px,calc(100% - 24px));max-height:min(62%,560px);overflow:auto;z-index:15;background:#0e2639f5;border:1px solid #5a8595;border-radius:12px;box-shadow:0 12px 28px #000b;padding:0;color:#e0edf5}
+#v43Drawer[hidden],#v43Stale[hidden],#v43SwitchWarn[hidden]{display:none!important}
+#v43Drawer header{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#1d4558;border-bottom:1px solid #4c7383;position:sticky;top:0;z-index:2}
+#v43Drawer header strong{font-size:13px}
+#v43Drawer header button{background:transparent;border:0;color:#f9eaca;font-size:17px;cursor:pointer}
+#v43Body{padding:10px 12px;font-size:12px;line-height:1.55}
+#v43Body .kv{border:1px solid #274052;border-radius:7px;padding:6px;margin:4px 0}
+#v43Body .kv small{color:#9fc3d3;display:block}
+.v43Stale{background:#5a3a12;border-bottom:1px solid #ffb35e;color:#ffe2ae;font-size:12px;padding:7px 12px}
+.v43Btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:10px 12px}
+.v43Btns button{font-size:12px;padding:8px}
+.v43Btns .primary{grid-column:span 2}
+.v43Row{padding:0 12px 10px;font-size:12px}
+.v43Row select{width:100%;margin-top:4px}
+#v43Compare{padding:0 12px 10px;font-size:12px}
+#v43Compare table{width:100%;border-collapse:collapse;font-size:12px}
+#v43Compare th,#v43Compare td{border:1px solid #2c4a5c;padding:5px 7px;text-align:left}
+.v43Links{display:flex;gap:6px;padding:0 12px 12px;flex-wrap:wrap}
+.v43Links button{font-size:12px}
+.v43Badge{display:inline-block;font-size:10px;border:1px solid #8fd6c9;border-radius:5px;padding:1px 5px;margin-left:5px;color:#bdf3ea;background:#123b3a}
+.v43Badge.warn{border-color:#ffb35e;color:#ffe2ae;background:#4a2f0e}
+.v43Badge.bad{border-color:#ef7b7b;color:#ffc9c9;background:#4a1a1a}
+#v43Status{font-size:11px;color:#9fced0;max-width:300px}
+#v43ViewSel{font-size:12px;padding:5px}
+.v43SwitchWarn{background:#3a2a10;border:1px solid #ffb35e;color:#ffe2ae;border-radius:8px;padding:7px 10px;margin:8px 12px;font-size:11px}
+@media(max-width:800px){#v43Drawer{left:8px;right:8px;bottom:8px;width:auto;max-height:55%}}
+/* v4.3 hotfix: the mobile drawer must not mask the lightning toggle. */
+#v42LightningButton{z-index:36!important}
+#v42LightningPanel{z-index:25!important}

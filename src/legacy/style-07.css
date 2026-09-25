@@ -1,0 +1,13 @@
+
+/* v5.5 adaptive flow + energization diagnostics */
+#v55AnimControls{display:grid;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid #294659}
+#v55AnimControls label{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:13px}
+#v55AnimControls select,#v55AnimControls input{max-width:150px}
+.v55Diag{margin-top:10px;padding:10px;border:1px solid #2f5063;border-radius:10px;background:#102638}
+.v55Diag h4{margin:0 0 8px;font-size:13px}
+.v55Diag .row{display:flex;justify-content:space-between;gap:12px;margin:4px 0;font-size:12px}
+.v55Diag .ok{color:#8fe0c7}.v55Diag .warn{color:#f4c66d}.v55Diag .bad{color:#f28d94}
+.v55Diag button{margin-top:8px;width:100%}
+#v55FlowStatus{font-size:11px;color:#9db7c8;margin-left:auto;white-space:nowrap}
+#v55NewtonDiag{margin-top:8px;padding:8px;border-radius:8px;background:#0c2030;border:1px solid #294659;font-size:11px;line-height:1.45}
+@media(max-width:900px){#v55FlowStatus{display:none}.v55Diag .row{display:block}}

@@ -1,0 +1,91 @@
+/* v5.4 — Single-map workspace. Legacy controls remain in DOM for electrical engine compatibility. */
+#view-map{--v54toolbar:51px;--v54panel:clamp(340px,31vw,490px)}
+#view-map>.heading,#view-map>.panel,#view-map>#v51Toolbar,#view-map>#v42Toolbar,
+#view-map>#v4ValidationMap,#view-map>#v51Impact,#view-map>.v53Preflight,#view-map>.v53TerminalToggle,
+#view-map>.v53Legend,#view-map .mapLegend,#view-map .maphint,#view-map #mapDetail,
+#view-map .v42Secondary,#view-map #v42TopStatus{display:none!important}
+#view-map>.layout{display:block!important;position:relative;margin:0;grid-template-columns:1fr!important}
+#view-map>.layout>div{min-width:0}
+#view-map #geoMode{position:relative}
+#view-map #mapWrap{height:clamp(520px,calc(100dvh - 166px),1300px)!important;min-height:480px;width:100%;border-radius:13px;margin:0}
+#view-map #v54Toolbar{display:flex;align-items:center;gap:7px;height:51px;min-height:51px;max-width:100%;overflow-x:auto;overflow-y:hidden;white-space:nowrap;scrollbar-width:thin;padding:5px 5px 8px;position:relative;z-index:4}
+#view-map #v54Toolbar button{flex:0 0 auto;padding:7px 10px;min-height:35px;font-weight:600}
+#view-map #v54Toolbar .v54FilterToggle{background:#23546a;border-color:#4d97a4}
+#view-map #v54Toolbar .v54Group.active,#view-map #v54Toolbar .v54Metric.active,#view-map #v54Toolbar .v54Mode.active{background:#286a78;border-color:#82d4d3;color:#fff}
+#view-map #v54Toolbar .v54Group.mixed{border-style:dashed;border-color:#d9ac62}
+#view-map #v54Toolbar select{max-width:132px;height:35px;padding:5px 7px}
+#view-map #v54Toolbar .v54Divider{height:25px;border-left:1px solid #416078;margin:0 3px}
+#view-map #v54Toolbar .v54State{padding:4px 8px;color:#ffe0a5;border:1px solid #856934;border-radius:8px;max-width:280px;overflow:hidden;text-overflow:ellipsis}
+#view-map #v42MapAside{display:none!important}
+#view-map #v42MapAside.v54Open{display:block!important;position:absolute!important;z-index:35;top:9px;left:9px;width:min(370px,calc(100% - 22px));max-height:calc(100% - 18px);overflow:auto;margin:0;background:#142a3bf7;box-shadow:0 15px 38px #000a;border:1px solid #628a99;border-radius:12px}
+#view-map #v42MapAside #voltageLayers{display:flex;flex-wrap:wrap;gap:6px}
+#view-map #v42MapAside #v43Minor{display:block;max-width:100%;width:100%}
+#view-map #v42MapAside #v43Minor .v42MinorBody{display:flex;flex-wrap:wrap}
+#view-map #v42MapAside #voltageLayers .v42Volt{font-size:12px;margin:3px}
+#view-map #v42MapAside #voltageLayers .v42Volt small{display:none}
+#view-map #v54FilterHeader{display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:0;background:#153145;z-index:2;padding:9px;margin:-15px -15px 9px}
+#view-map #v54FilterHeader button{min-height:32px}
+#view-map #v54FilterExtra{border-top:1px solid var(--edge);padding-top:9px;margin-top:10px}
+#view-map #v54FilterExtra label{display:flex;align-items:center;gap:8px;padding:5px 0}
+#view-map #mapOverlay{max-width:min(400px,65%);font-size:11px;padding:5px 8px;background:#102235d8;border-radius:8px}
+#view-map #v42LightningButton{right:16px;bottom:16px;z-index:27}
+#view-map #v42LightningPanel{right:9px!important;top:9px!important;bottom:9px!important;width:min(var(--v54panel),calc(100% - 18px))!important;max-width:none!important;z-index:36!important;box-shadow:0 20px 44px #020812bd}
+#view-map #v42LightningPanel>header{flex:0 0 auto;min-height:45px}
+#view-map #v54SideTabs{display:flex;align-items:center;gap:5px;padding:8px 10px 4px;overflow-x:auto;border-bottom:1px solid #34536a;flex:0 0 auto}
+#view-map #v54SideTabs button{padding:6px 9px;white-space:nowrap}
+#view-map #v54SideTabs button.active{background:#286a78;border-color:#88d4d9}
+#view-map #v42LightningPanel.v54Selected #v43Drawer{display:block!important}
+#view-map #v42LightningPanel.v54Selected .v42Ltabs,#view-map #v42LightningPanel.v54Selected .v42Controls,#view-map #v42LightningPanel.v54Selected #v42LNote,#view-map #v42LightningPanel.v54Selected .v42LScroll,#view-map #v42LightningPanel.v54Selected #v51LightningDeltaBody{display:none!important}
+#view-map #v43Drawer{position:static!important;left:auto!important;right:auto!important;bottom:auto!important;top:auto!important;width:100%!important;max-height:none!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important;overflow:auto!important;flex:1 1 auto!important}
+#view-map #v43Drawer[hidden]{display:none!important}
+#view-map #v43Drawer>header{display:none}
+#view-map #v43Drawer .v43Btns{display:grid;grid-template-columns:1fr 1fr;gap:7px;padding:10px}
+#view-map #v43Drawer .v43Btns button{min-height:38px;white-space:normal}
+#view-map #v43Drawer .v43Btns button[hidden]{display:none!important}
+#view-map #v43Drawer #v43Body>.kv{margin:4px 9px;padding:7px}
+#view-map #v43Drawer #v43Body>.kv:nth-child(n+6){display:none}
+#view-map #v43Drawer #v43Body.v54DetailFull>.kv{display:block}
+#view-map #v43Drawer #v43Compare{padding:9px;overflow:auto}
+#view-map #v43Drawer .v43Links{padding:7px}
+#view-map #v54SideSummary{display:none;overflow:auto;flex:1 1 auto;padding:12px}
+#view-map #v42LightningPanel.v54Station #v54SideSummary{display:block}
+#view-map #v42LightningPanel.v54Station .v42Ltabs,#view-map #v42LightningPanel.v54Station .v42Controls,#view-map #v42LightningPanel.v54Station #v42LNote,#view-map #v42LightningPanel.v54Station .v42LScroll,#view-map #v42LightningPanel.v54Station #v43Drawer,#view-map #v42LightningPanel.v54Station #v51LightningDeltaBody{display:none!important}
+#view-map #v54SideSummary h3{color:#b9f2f0;margin:8px 0}
+#view-map #v54SideSummary .v54SummaryGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+#view-map #v54SideSummary .v54SummaryGrid>div{background:#182e40;padding:9px;border-radius:8px}
+#view-map #v54SideSummary small{display:block;color:#a3c0cd}
+#view-map #v54SideSummary button{margin:5px 3px 2px 0}
+#view-map #v54Quality{position:absolute;top:42px;left:9px;z-index:7;max-width:min(480px,60%);background:#203445d9;border:1px solid #906f40;color:#f6d49b;padding:5px 9px;border-radius:7px;pointer-events:none;font-size:11px}
+#view-map #v54Quality:empty{display:none}
+#view-map #v51Split{z-index:3}
+#view-map #v53Tip{z-index:24}
+@media(max-width:790px){#view-map #mapWrap{height:clamp(450px,calc(100dvh - 152px),1100px)!important}#view-map #v42LightningPanel{width:calc(100% - 18px)!important}#view-map #v54Toolbar{gap:5px}#view-map #v54Toolbar button{padding:6px 8px}#view-map #v54Quality{font-size:10px}}
+/* v5.4 hotfix: the late v5.0/v5.3 notices are nested in geoMode, not direct view children. */
+#view-map .v5MapValidation,#view-map .v53Preflight,#view-map .v53TerminalToggle,#view-map .v53Legend{display:none!important}
+#view-map #v54CompactLine{flex:0 0 auto;padding:10px;border-bottom:1px solid #355369}
+#view-map #v54CompactLine h3{font-size:15px;margin:0 0 4px;color:#c4f2ef}
+#view-map #v54CompactLine .v54Pills{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0}
+#view-map #v54CompactLine .v54Pills span{display:inline-flex;align-items:center;font-size:11px;padding:3px 7px;border-radius:12px;background:#214a60;border:1px solid #3c7990}
+#view-map #v54CompactLine .v54Stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+#view-map #v54CompactLine .v54Stats>div{padding:7px;border-radius:7px;background:#122c3c}
+#view-map #v54CompactLine small{color:#a0c3d2;display:block}
+#view-map #v54CompactLine strong{font-size:14px}
+#view-map #v43Drawer #v43Body{display:none!important}
+#view-map #v43Drawer.v54ShowDetails #v43Body{display:block!important}
+#view-map #v43Drawer.v54ShowDetails #v43Body>.kv{display:block!important}
+#view-map #v43Drawer #v43Compare{max-height:245px;overflow:auto}
+#view-map #v43Drawer .v43Btns{position:sticky;top:0;background:#102638;z-index:5;box-shadow:0 4px 9px #0004}
+#view-map #mapWrap{height:clamp(500px,calc(100dvh - 220px),1240px)!important}
+@media(max-width:790px){#view-map #mapWrap{height:clamp(445px,calc(100dvh - 200px),1080px)!important}}
+#view-map #v54CompactLine .v54W{margin-top:8px;border:1px solid #93703b;border-radius:8px;background:#3d3427;padding:7px 9px;color:#f5dca4;font-size:11px}
+@media(max-width:790px){
+ .apphead{padding:8px 10px;min-height:56px;gap:9px}
+ .apphead .brandlogo{display:none}
+ .apphead .brand{min-width:0;flex:1}
+ .apphead .brand h1{font-size:12px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;max-width:196px}
+ .apphead .brand small{display:none}
+ .apphead .modelhead{max-width:155px;font-size:10px;line-height:1.25;flex:0 0 auto}
+ .tabs{padding:6px 9px;gap:3px}
+ .shell{padding:8px 10px}
+ #view-map #mapWrap{height:clamp(440px,calc(100dvh - 220px),1050px)!important}
+}
