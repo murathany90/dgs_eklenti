@@ -25,9 +25,7 @@ jobs:
       - run: node --import tsx tools/benchmark-electrical.mjs docs/fixtures/dgs-smoke-from-20260923.json kontrol1/20260923_1200_SN3_TR0.json kontrol1/20260925_1000_SN5_TR0.json
       - run: npm run build
       - run: npx playwright install --with-deps chromium
-      - name: UI, local solver and screenshot review
-        env:
-          YTBS_E2E_INSTALL_NATIVE_HOST: '1'
+      - name: UI and screenshot review
         run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
