@@ -43,7 +43,7 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
  fingerprint:function(){return v43Fp();},
  commitMutation:function(){
   v43AbortSolve(); v4.scenario=null;v4.scenarioSolver=null;SC.revision++;SC.lastCalcKey=null;
-  SC.pending=v4.overrides.size>0||v42.switchOverrides.size>0;SC.viewMode='reference';v3.solver=v4.baseSolver||null;
+  SC.pending=v4.overrides.size>0||v42.switchOverrides.size>0||(window.VirtualEnergizationEngine?.restored?.().length||0)>0;SC.viewMode='reference';v3.solver=v4.baseSolver||null;
   v2.sets.splice(0,v2.sets.length,...(v4.base?[v4.base]:[]));v2.selectedSet=v4.base?.id||'';
   try{stopFlow();listSets();drawMap();v4OverlayStatus();v4ValidateCalc();v4ScenarioComparison();v42RenderSwitchAnalysis();}catch(_){}
   try{v43SyncViewSets();v43Refresh();}catch(_){}
@@ -81,11 +81,20 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
  },
  restore:function(snapshot){
   if(!active||!snapshot)return false;
+  var normalizeEntries=function(entries,valid){return (entries||[]).filter(function(entry){return Array.isArray(entry)&&valid(entry[0]);}).map(function(entry){return [String(entry[0]),Number(entry[1])===1?1:0];}).sort(function(a,b){return a[0]<b[0]?-1:a[0]>b[0]?1:0;});};
+  var nextLines=normalizeEntries(snapshot.lines,function(id){return !!active.lineById(id);});
+  var nextSwitches=normalizeEntries(snapshot.switches,function(id){return !!active.get('ElmCoup',id);});
+  var nextRestored=[...new Set((snapshot.restoredTerminals||[]).map(function(id){return String(id??'').trim();}).filter(Boolean))].sort(function(a,b){return a<b?-1:a>b?1:0;});
+  var currentLines=normalizeEntries([...v4.overrides],function(){return true;});
+  var currentSwitches=normalizeEntries([...v42.switchOverrides],function(){return true;});
+  var currentRestored=[...new Set((window.VirtualEnergizationEngine?.restored?.()||[]).map(function(id){return String(id??'').trim();}).filter(Boolean))].sort(function(a,b){return a<b?-1:a>b?1:0;});
+  var auto=$('v53AutoTerm'),nextAuto=snapshot.autoRestoreTerminals===true;
+  if(JSON.stringify(nextLines)===JSON.stringify(currentLines)&&JSON.stringify(nextSwitches)===JSON.stringify(currentSwitches)&&JSON.stringify(nextRestored)===JSON.stringify(currentRestored)&&!!(auto&&auto.checked)===nextAuto){try{window.YTBS_V53?.refreshRestoredEnds?.();}catch(_){}return true;}
   v4.overrides.clear();v42.switchOverrides.clear();
-  for(var entry of snapshot.lines||[])if(Array.isArray(entry)&&active.lineById(entry[0]))v4.overrides.set(entry[0],Number(entry[1])===1?1:0);
-  for(var entry of snapshot.switches||[])if(Array.isArray(entry)&&active.get('ElmCoup',entry[0]))v42.switchOverrides.set(entry[0],Number(entry[1])===1?1:0);
-  try{window.VirtualEnergizationEngine?.restore?.(snapshot.restoredTerminals||[]);}catch(_){}
-  try{var auto=$('v53AutoTerm');if(auto)auto.checked=!!snapshot.autoRestoreTerminals;refreshRestoredEnds();}catch(_){}
+  for(var entry of nextLines)v4.overrides.set(entry[0],entry[1]);
+  for(var entry of nextSwitches)v42.switchOverrides.set(entry[0],entry[1]);
+  try{window.VirtualEnergizationEngine?.restore?.(nextRestored);}catch(_){}
+  try{if(auto)auto.checked=nextAuto;window.YTBS_V53?.refreshRestoredEnds?.();}catch(_){}
   v4.activeOverrides=v4.overrides.size?v4.overrides:null;SC.history.splice(0);SC.commitMutation();return true;
  },
  apply:function(id,off){
@@ -135,8 +144,10 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
  reset:function(){
   try{
    v43AbortSolve();
-    if(!v4.overrides.size&&!v42.switchOverrides.size)return true;
-    v4.overrides.clear();v42.switchOverrides.clear(); v4.activeOverrides=null; v4.scenario=null;
+    var restored=window.VirtualEnergizationEngine?.restored?.()||[],auto=$('v53AutoTerm');
+    if(!v4.overrides.size&&!v42.switchOverrides.size&&!restored.length&&!(auto&&auto.checked))return true;
+    v4.overrides.clear();v42.switchOverrides.clear();window.VirtualEnergizationEngine?.restore?.([]);if(auto)auto.checked=false;try{window.YTBS_V53?.refreshRestoredEnds?.();}catch(_){}
+    v4.activeOverrides=null; v4.scenario=null;
    if(v4.base){v2.sets.splice(0,v2.sets.length,v4.base);v2.selectedSet=v4.base.id;v3.solver=v4.baseSolver;}
    else{v2.sets.splice(0);v2.selectedSet='';v3.solver=null;}
     SC.history.splice(0);SC.commitMutation();
@@ -154,7 +165,7 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
   try{
    var wasRunning=v43AbortSolve();
    v4.scenario=null;v4.scenarioSolver=null;SC.lastCalcKey=null;
-   SC.pending=v4.overrides.size>0||v42.switchOverrides.size>0;v3.solver=null;
+   SC.pending=v4.overrides.size>0||v42.switchOverrides.size>0||(window.VirtualEnergizationEngine?.restored?.().length||0)>0;v3.solver=null;
    v43SyncViewSets();
    v4Notify(wasRunning?'Hesap iptal edildi; bekleyen senaryo sonucu uygulanmayacak.':'Calisan hesap yok.',true);
    v43Refresh();if(selectedLine)v43OpenDrawer(selectedLine);drawMap(); return wasRunning;
@@ -164,7 +175,7 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
   (async function(){
    try{
     if(!active){v4Notify('Once bir JSON yukleyiniz.',true);return;}
-    if(!v4.overrides.size&&!v42.switchOverrides.size){v4Notify('Senaryo icin once bir hat veya anahtar durumu degistiriniz.',true);return;}
+    if(!v4.overrides.size&&!v42.switchOverrides.size&&!(window.VirtualEnergizationEngine?.restored?.().length||0)){v4Notify('Senaryo icin once bir hat, anahtar veya terminal durumu degistiriniz.',true);return;}
     if(v3.running){v4Notify('Baska bir hesap suruyor.',true);return;}
     var model=active, fp=v43Fp(), rev=SC.revision, stamp=++v4.generation;
     v4Notify('Senaryo topolojisi kuruluyor, deneysel 66 kV+ AC-PQ hesaplaniyor\u2026');
@@ -604,7 +615,7 @@ try{
  $('v4ScenarioOn').onclick=function(){var l=v4ScenarioLine();if(l)SC.apply(l.FID,0);else v4Notify('Hat ID veya adi bulunamadi.',true);};
  $('v4ScenarioRun').onclick=function(){SC.run();};
  $('v4ScenarioReset').onclick=function(){SC.reset();};
- $('runSolver').onclick=function(){if(v4.overrides.size)SC.run();else startV3Solver();};
+ $('runSolver').onclick=function(){if(SC.pending)SC.run();else startV3Solver();};
 }catch(_){}
 
 /* ilk kurulum */

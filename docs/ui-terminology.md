@@ -1,4 +1,4 @@
-# v6.1.2 UI terminology
+# v6.1.3 Grid Analyzer UI terminology
 
 | Internal source name | Default display |
 | --- | --- |

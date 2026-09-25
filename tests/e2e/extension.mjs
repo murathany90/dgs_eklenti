@@ -1,12 +1,13 @@
 import { chromium } from 'playwright';
 import { resolve, basename, join } from 'node:path';
-import { mkdtemp, rm, readFile, mkdir, writeFile, chmod, unlink } from 'node:fs/promises';
+import { mkdtemp, rm, readFile, mkdir, writeFile, chmod, unlink, copyFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 
 const extension = resolve('dist');
-const profile = await mkdtemp(join(tmpdir(), 'ytbs-v612-e2e-'));
+const profile = await mkdtemp(join(tmpdir(), 'ga-v613-e2e-'));
 const screenshots = resolve('artifacts/ui-review');
 await mkdir(screenshots, { recursive: true });
+for (const size of [16, 32, 48, 128]) await copyFile(resolve(`dist/assets/icons/ga-${size}.png`), join(screenshots, `branding-${size}.png`));
 const launch = () => chromium.launchPersistentContext(profile, {
   ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chromium' }),
   headless: true, viewport: { width: 1440, height: 900 },
@@ -26,7 +27,7 @@ try {
     try { previousHostManifest = await readFile(hostManifestPath, 'utf8'); } catch {}
     const launcher = resolve('native-host/python/launch_host.py');
     await chmod(launcher, 0o755);
-    await writeFile(hostManifestPath, JSON.stringify({ name: 'com.ytbs.powerfactory.solver', description: 'YTBS local pandapower solver', path: launcher,
+    await writeFile(hostManifestPath, JSON.stringify({ name: 'com.ytbs.powerfactory.solver', description: 'Grid Analyzer local pandapower solver', path: launcher,
       type: 'stdio', allowed_origins: [`chrome-extension://${id}/`] }, null, 2));
     context = await launch();
     worker = context.serviceWorkers()[0] ?? await context.waitForEvent('serviceworker', { timeout: 30000 });
@@ -34,6 +35,8 @@ try {
   }
   const panel = await context.newPage();
   await panel.goto(`chrome-extension://${id}/sidepanel.html`);
+  if (await panel.title() !== 'Grid Analyzer' || !(await panel.locator('h1').innerText()).includes('Grid Analyzer') || !(await panel.locator('strong').innerText()).includes('Şebeke Analiz Sistemi')) throw Error('Sidepanel Grid Analyzer branding missing');
+  await panel.screenshot({ path: join(screenshots, 'sidepanel-branding.png'), animations: 'disabled' });
   await panel.locator('#modelFile').setInputFiles(resolve('docs/fixtures/dgs-smoke-from-20260923.json'));
   await panel.locator('#status').getByText(/hazır/).waitFor({ timeout: 30000 });
   const opened = context.waitForEvent('page');
@@ -52,6 +55,14 @@ try {
   await page.locator('#v6Validation').waitFor({ timeout: 120000 });
   if (process.env.DGS_E2E_MODEL) await page.waitForFunction(name => document.querySelector('#v6Validation')?.dataset.modelName === name, basename(process.env.DGS_E2E_MODEL), { timeout: 120000 });
   await page.waitForFunction(() => !!document.querySelector('#v6Metadata')?.dataset.components, null, { timeout: 120000 });
+  if (await page.title() !== 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.3') throw Error(`Workspace title branding mismatch: ${await page.title()}`);
+  if (await page.locator('.apphead h1').innerText() !== 'Grid Analyzer' || await page.locator('.brand small').innerText() !== 'Şebeke Analiz Sistemi') throw Error('Workspace header branding missing');
+  if (!(await page.locator('#footerRight').innerText()).includes('Grid Analyzer · Chrome MV3 · v6.1.3')) throw Error('Workspace footer branding missing');
+  const visibleBrandText = await page.locator('body').innerText();
+  for (const oldName of ['YTBS Şebeke Analiz ve Görüntüleme', 'YTBS Şebeke Görüntüleyici', 'PowerFactory Şebeke Görüntüleyici ve Analiz Sistemi']) {
+    if (visibleBrandText.includes(oldName)) throw Error(`Old product branding remains visible: ${oldName}`);
+  }
+  await page.locator('.brand').screenshot({ path: join(screenshots, 'header-branding.png'), animations: 'disabled' });
 
   const checkTerminology = async label => {
     const visible = await page.locator('body').innerText();
@@ -96,6 +107,7 @@ try {
 
   await page.locator('#primaryTabs [data-primary="analysis"]').click();
   await checkTerminology('analysis before run');
+  await page.locator('#v61SolverPanel').screenshot({ path: join(screenshots, 'analysis-branding.png'), animations: 'disabled' });
   await snap('05-analysis-before-run.png');
   const metadata = await page.locator('#v6Metadata').innerText();
   if (!metadata.includes('66 kV+ indirgenmiş ağ')) throw Error(`Browser engine scope status missing: ${metadata}`);
@@ -111,7 +123,7 @@ try {
   await page.waitForFunction(() => !window.YTBS_AnalysisState?.activeResult || window.YTBS_AnalysisState.activeResult.summary.mode === 'AC');
   if (await page.evaluate(() => window.YTBS_AnalysisState?.activeResult?.summary.mode === 'DC')) throw Error('DC result leaked into selected AC mode');
   await page.locator('#v61HostHealthButton').click();
-  await page.waitForFunction(() => /Yerel hesap motoru/.test(document.querySelector('#v61HostHealth')?.textContent ?? ''), null, { timeout: 15000 });
+  await page.waitForFunction(() => /Grid Analyzer Yerel Hesap Motoru/.test(document.querySelector('#v61HostHealth')?.textContent ?? ''), null, { timeout: 15000 });
   await snap('06-host-health.png');
   await page.locator('#v61Mode').selectOption('DC');
   await page.locator('#v61Run').click();
@@ -130,7 +142,7 @@ try {
     await checkTerminology('DC result');
     await snap('10-result-unavailable-reason.png');
   } else {
-    await page.waitForFunction(() => /Yerel hesap motoru (?:Chrome’a kayıtlı değil|bu Chrome Extension ID için izinli değil|başlatılamadı)/.test(document.querySelector('#v61Status')?.textContent ?? ''), null, { timeout: 30000 });
+    await page.waitForFunction(() => /Grid Analyzer Yerel Hesap Motoru (?:Chrome’a kayıtlı değil|bu Chrome Extension ID için izinli değil|başlatılamadı)/.test(document.querySelector('#v61Status')?.textContent ?? ''), null, { timeout: 30000 });
     await page.locator('#v61HostActions').getByText('Kurulum Yardımı').waitFor();
     if (!(await page.locator('#v61InstallCommand').innerText()).includes(id)) throw Error('Windows install command does not contain this runtime extension ID');
     console.log('Native host E2E SKIP: local host not installed; UI install guidance verified.');
@@ -171,6 +183,51 @@ try {
   await page.screenshot({ path: join(screenshots, '10-result-unavailable-reason.png'), animations: 'disabled' });
 
   await page.locator('#primaryTabs [data-primary="scenario"]').click();
+  const terminalIds = await page.evaluate(() => {
+    const model = window.V6Legacy.getActive();
+    return [0, 1].map(index => model?.row('ElmTerm', index)?.FID).filter(Boolean);
+  });
+  if (terminalIds.length >= 2) {
+    const terminalMutation = await page.evaluate(ids => {
+      const before = window.ScenarioController.revision;
+      window.VirtualEnergizationEngine.restore(ids);
+      window.ScenarioController.touch();
+      return { before, after: window.ScenarioController.revision, terminals: window.V6Legacy.getScenario().restoredTerminals };
+    }, terminalIds);
+    if (terminalMutation.after !== terminalMutation.before + 1 || terminalMutation.terminals.length !== 2) throw Error(`Restored terminal scenario did not commit exactly once: ${JSON.stringify(terminalMutation)}`);
+    await page.waitForFunction(async expected => await new Promise(resolve => {
+      const open = indexedDB.open('ytbs-dgs-v6', 1);
+      open.onerror = () => resolve(false);
+      open.onsuccess = () => {
+        const request = open.result.transaction('scenarios', 'readonly').objectStore('scenarios').getAll();
+        request.onsuccess = () => resolve(request.result.some(record => record.id.endsWith(':latest') && JSON.stringify(record.snapshot?.restoredTerminals) === JSON.stringify(expected)));
+        request.onerror = () => resolve(false);
+      };
+    }), terminalIds, { timeout: 15000 });
+    await page.evaluate(() => window.VirtualEnergizationEngine.restore([]));
+    const reloadStarted = await page.evaluate(async () => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('ytbs-dgs-v6', 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const records = await new Promise((resolve, reject) => {
+        const request = db.transaction('models', 'readonly').objectStore('models').getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      const saved = records.find(record => record.id !== 'pending' && record.file instanceof File);
+      if (!saved) return false;
+      window.__gaPreviousModel = window.V6Legacy.getActive();
+      await window.V6Legacy.loadFiles([saved.file]);
+      return true;
+    });
+    if (!reloadStarted) throw Error('Persisted DGS file was not available for scenario restore test');
+    await page.waitForFunction(expected => window.V6Legacy.getActive() !== window.__gaPreviousModel && expected.every(id => window.V6Legacy.getScenario().restoredTerminals.includes(id)), terminalIds, { timeout: process.env.DGS_E2E_MODEL ? 180000 : 30000 });
+    await page.evaluate(() => window.ScenarioController.reset());
+  } else {
+    console.log('Restored terminal persistence E2E SKIP: the loaded DGS model exposes fewer than two ElmTerm records.');
+  }
   if (process.env.DGS_E2E_MODEL) {
     const mutation = await page.evaluate(() => {
       const before = window.ScenarioController.revision;
@@ -247,7 +304,11 @@ try {
   await page.screenshot({ path: join(screenshots, 'responsive-1280x720.png'), animations: 'disabled' });
   if (errors.length) throw Error(`Page errors: ${errors.join(' | ')}`);
   const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'));
-  if (manifest.manifest_version !== 3 || manifest.version !== '6.1.2') throw Error('Manifest V3 / v6.1.2 mismatch');
+  if (manifest.manifest_version !== 3 || manifest.version !== '6.1.3' || manifest.name !== 'Grid Analyzer - Şebeke Analiz Sistemi' || manifest.icons?.['16'] !== 'assets/icons/ga-16.png') throw Error('Manifest V3 / v6.1.3 branding mismatch');
+  for (const size of [16, 32, 48, 128]) {
+    const png = await readFile(resolve(`dist/assets/icons/ga-${size}.png`));
+    if (png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) throw Error(`Packaged ga-${size}.png has incorrect dimensions`);
+  }
   console.log(`Extension UI E2E passed; screenshots: ${screenshots}`);
 } finally {
   await context.close();

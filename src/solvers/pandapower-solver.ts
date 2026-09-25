@@ -9,7 +9,7 @@ interface Message { type: string; protocolVersion: string; requestId: string; jo
 interface Port { postMessage: (message: Message) => void; disconnect: () => void; onMessage: { addListener: (listener: (message: Message) => void) => void }; onDisconnect: { addListener: (listener: () => void) => void } }
 declare const chrome: { runtime: { id?: string; connectNative: (name: string) => Port; lastError?: { message: string } } };
 export type NativeHostErrorKind = 'HOST_NOT_REGISTERED' | 'HOST_ORIGIN_MISMATCH' | 'HOST_START_FAILED' | 'HOST_DISCONNECTED' | 'HOST_CRASHED' | 'PROTOCOL_ERROR' | 'SOLVER_ERROR' | 'TIMEOUT';
-export interface NativeHostHealth { status: 'CONNECTED' | 'PROTOCOL_MISMATCH' | 'ENGINE_MISMATCH'; protocolVersion: string; engine: string; engineVersion: string; extensionId: string }
+export interface NativeHostHealth { status: 'CONNECTED' | 'PROTOCOL_MISMATCH' | 'ENGINE_MISMATCH' | 'ENGINE_VERSION_MISMATCH'; protocolVersion: string; engine: string; engineVersion: string; extensionId: string }
 
 function base64(bytes: Uint8Array): string {
   let binary = '';
@@ -51,9 +51,9 @@ export class PandapowerSolver implements PowerSystemSolver {
         const timer = setTimeout(() => finish(() => reject(new NativeHostError('TIMEOUT', 'Native host health check timed out'))), timeoutMs);
         port.onMessage.addListener(message => {
           if (message.requestId !== requestId || message.jobId !== jobId) return;
-          if (message.protocolVersion !== VERSION) return finish(() => reject(new NativeHostError('PROTOCOL_ERROR', `Native host protocol version mismatch: ${String(message.protocolVersion)}`)));
+          if (message.type === 'CAPABILITIES') return finish(() => resolve(message));
           if (message.type === 'ERROR') return finish(() => reject(new NativeHostError(classifyHostResponse(String(message.code ?? '')), `${String(message.code ?? '')}: ${String(message.message ?? '')}`)));
-          if (message.type === 'CAPABILITIES') finish(() => resolve(message));
+          if (message.protocolVersion !== VERSION) return finish(() => reject(new NativeHostError('PROTOCOL_ERROR', `Native host protocol version mismatch: ${String(message.protocolVersion)}`)));
         });
         port.onDisconnect.addListener(() => {
           const message = chrome.runtime.lastError?.message ?? 'Native host connection closed before health response';
@@ -64,8 +64,9 @@ export class PandapowerSolver implements PowerSystemSolver {
       });
       const engine = String(capabilities.engine ?? '');
       const engineVersion = String(capabilities.engineVersion ?? '');
-      const status = engine !== 'pandapower' ? 'ENGINE_MISMATCH' : engineVersion !== '3.5.5' ? 'PROTOCOL_MISMATCH' : 'CONNECTED';
-      return { status, protocolVersion: String(capabilities.protocolVersion), engine, engineVersion, extensionId: chrome.runtime.id ?? 'bilinmiyor' };
+      const protocolVersion = String(capabilities.protocolVersion ?? '');
+      const status = protocolVersion !== VERSION ? 'PROTOCOL_MISMATCH' : engine !== 'pandapower' ? 'ENGINE_MISMATCH' : engineVersion !== '3.5.5' ? 'ENGINE_VERSION_MISMATCH' : 'CONNECTED';
+      return { status, protocolVersion, engine, engineVersion, extensionId: chrome.runtime.id ?? 'bilinmiyor' };
     } finally { port.disconnect(); }
   }
   async runLoadFlow(

@@ -1,11 +1,11 @@
-# YTBS / PowerFactory DGS Şebeke Görüntüleyici v6.1 — Aşama 2
+# Grid Analyzer — Şebeke Analiz Sistemi
 
-DIgSILENT PowerFactory DGS JSON modellerini yerel olarak açan Chrome Manifest V3 uzantısı. v5.5'in harita, hat ve trafo merkezi seçimi, tek hat şeması, fider görünümü, kapasite, senaryo ve deneysel yaklaşık hesabını korur. v6.1 elektriksel kanonik model, yerel pandapower AC/DC host ve typed ResultSet V2 ekler.
+Grid Analyzer (GA), elektrik şebekesi modellerinin görüntülenmesi, topoloji incelemesi ve elektriksel analizleri için geliştirilen Chrome MV3 tabanlı mühendislik uygulamasıdır. YTBS / DIgSILENT PowerFactory DGS JSON biçimini teknik veri kaynağı olarak destekler; modeller ve hesaplar yerel olarak işlenir. Sürüm 6.1.3 senaryo kimliği/kalıcı terminal durumlarını ve yeni marka görünümünü içerir.
 
 ## Kurulum ve kullanım
 
 ```sh
-npm install
+npm ci
 npm run typecheck
 npm run lint
 npm test
@@ -15,9 +15,9 @@ python -m pip install -e native-host/python
 python -m unittest discover -s native-host/python/tests -v
 ```
 
-Chrome'da `chrome://extensions` → Developer mode → Load unpacked → bu projenin `dist/` klasörünü seçin. Araç çubuğundaki uzantı simgesini tıklayarak yan paneli açın. DGS JSON dosyasını panelden seçip **Çalışma Alanını Aç** düğmesine basın. Dosya doğrudan çalışma alanındaki **Model** sekmesinden de seçilebilir. Büyük model, senaryo ve sonuçlar IndexedDB'de yerel olarak saklanır. Uzantı host izni veya uzak JavaScript istemez. pandapower için Windows yerel host kurulumunu [native messaging](docs/native-messaging.md) belgesi anlatır; host kurulmamışsa arayüz `HOST NOT INSTALLED` gösterir.
+Chrome'da `chrome://extensions` → Developer mode → Load unpacked → bu projenin `dist/` klasörünü seçin. Araç çubuğundaki GA simgesini tıklayarak yan paneli açın. DGS JSON dosyasını panelden seçip **Çalışma Alanını Aç** düğmesine basın. Dosya doğrudan çalışma alanındaki **Model** sekmesinden de seçilebilir. Büyük model, senaryo ve sonuçlar IndexedDB'de yerel olarak saklanır. Uzantı host izni veya uzak JavaScript istemez. pandapower için Windows yerel host kurulumunu [native messaging](docs/native-messaging.md) belgesi anlatır.
 
-`npm run test:e2e` paketlenmiş Chromium uzantısıyla smoke testi çalıştırır. Yerel tam model tarayıcı regresyonu için PowerShell'de:
+Windows yerel kurulum adımları ve küçük terminal/hat senaryo denemesi için [v6.1.3 yerel smoke testi](docs/local-smoke-test-v6.1.3.md) belgesini izleyin. `npm run test:e2e` paketlenmiş Chromium uzantısıyla smoke testi çalıştırır. Yerel tam model tarayıcı regresyonu için PowerShell'de:
 
 ```powershell
 $env:DGS_E2E_MODEL='kontrol1/20260923_1200_SN3_TR0.json'

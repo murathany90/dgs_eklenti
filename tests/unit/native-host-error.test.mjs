@@ -17,10 +17,10 @@ test('Chrome native host errors remain specific', () => {
 
 test('health check exchanges HELLO for capabilities and reports engine version', async () => {
   const previous = globalThis.chrome;
-  const install = engineVersion => {
+  const install = (engineVersion, overrides = {}) => {
     let listener;
     globalThis.chrome = { runtime: { id: 'abcdefghijklmnopabcdefghijklmnop', connectNative: () => ({
-      postMessage: message => queueMicrotask(() => listener({ type: 'CAPABILITIES', protocolVersion: '1.0', requestId: message.requestId, jobId: message.jobId, engine: 'pandapower', engineVersion })),
+      postMessage: message => queueMicrotask(() => listener({ type: 'CAPABILITIES', protocolVersion: '1.0', requestId: message.requestId, jobId: message.jobId, engine: 'pandapower', engineVersion, ...overrides })),
       disconnect: () => {}, onMessage: { addListener: fn => { listener = fn; } }, onDisconnect: { addListener: () => {} },
     }) } };
   };
@@ -30,6 +30,10 @@ test('health check exchanges HELLO for capabilities and reports engine version',
       status: 'CONNECTED', protocolVersion: '1.0', engine: 'pandapower', engineVersion: '3.5.5', extensionId: 'abcdefghijklmnopabcdefghijklmnop',
     });
     install('3.5.4');
+    assert.equal((await new PandapowerSolver().healthCheck()).status, 'ENGINE_VERSION_MISMATCH');
+    install('3.5.5', { engine: 'other-engine' });
+    assert.equal((await new PandapowerSolver().healthCheck()).status, 'ENGINE_MISMATCH');
+    install('3.5.5', { protocolVersion: '2.0' });
     assert.equal((await new PandapowerSolver().healthCheck()).status, 'PROTOCOL_MISMATCH');
   } finally {
     if (previous === undefined) delete globalThis.chrome; else globalThis.chrome = previous;

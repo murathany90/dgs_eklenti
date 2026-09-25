@@ -1,6 +1,6 @@
 {
   "name": "com.ytbs.powerfactory.solver",
-  "description": "YTBS local pandapower load flow solver",
+  "description": "Grid Analyzer local pandapower load flow solver",
   "path": "C:\\absolute\\path\\to\\launcher.cmd",
   "type": "stdio",
   "allowed_origins": ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]
