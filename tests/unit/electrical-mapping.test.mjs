@@ -71,6 +71,39 @@ test('TypSym Q limits fill absent ElmSym limits with source finding', () => {
   assert.equal(net.generators[0].qMinMvar, -6);
   assert.equal(net.generators[0].qMaxMvar, 7);
   assert.equal(net.findingCounts.GENERATOR_TYPE_Q_LIMIT, 2);
+  assert.equal(net.generators[0].qLimitSource, 'TypSym.Q_min/Q_max');
+});
+test('ElmStactrl source data is retained as mapped but not solved', () => {
+  const doc = fixture();
+  doc.ElmStactrl = table([{ FID: 'CTRL', loc_name: 'Station controller', outserv: 0, rembar: 'B2', selBus: 0,
+    usetp: 1.03, i_ctrl: 2, 'psym:SIZEROW': 1, 'psym:0': 'G', i_droop: 1, Srated: 80, ddroop: 4,
+    imode: 1, qsetp: 12, pQmeas: 'QPOINT' }]);
+  const net = map(doc);
+  const control = net.controls.find(item => item.kind === 'STATION');
+  assert.ok(control);
+  assert.equal(control.controlledBus, 'B2');
+  assert.deepEqual(control.controlledGeneratorIds, ['G']);
+  assert.equal(control.setpoint, 1.03);
+  assert.equal(control.controlModeCode, 2);
+  assert.equal(control.reactiveSharingModeCode, 1);
+  assert.equal(control.droopEnabled, true);
+  assert.equal(control.droopRatedMvar, 80);
+  assert.equal(control.droopPercent, 4);
+  assert.equal(control.mappingStatus, 'MAPPED_BUT_NOT_SOLVED');
+  assert.equal(net.modelCoverage.stationControlBus.available, 1);
+});
+test('ElmGenStat OPF option codes are not misread as numeric Q limits', () => {
+  const doc = fixture();
+  doc.ElmGenStat = table([{ FID: 'SG', bus1: 'C3', pgini: 5, qgini: 2, av_mode: 'constv', usetp: 1.02,
+    iOPFCQmin: 1, iOPFCQmax: 1, outserv: 0 }]);
+  doc.ElmSym = table([]);
+  const net = map(doc);
+  const staticGenerator = net.generators.find(item => item.id === 'SG');
+  assert.equal(staticGenerator.qMinMvar, null);
+  assert.equal(staticGenerator.qMaxMvar, null);
+  assert.equal(net.modelCoverage.pvGeneratorQLimits.available, 0);
+  assert.equal(net.modelCoverage.elmGenStatQLimits.available, 0);
+  assert.equal(net.findingCounts.STATIC_GENERATOR_Q_LIMITS_UNAVAILABLE, 1);
 });
 test('shunt, series compensation, switch and controls map explicitly', () => {
   const net = map(fixture());
@@ -88,4 +121,18 @@ test('missing parameter yields null and finding', () => {
   assert.equal(net.transformers[0].phaseShiftDeg, null);
   assert.equal(net.completeness, 'PARTIAL');
   assert.equal(net.findingCounts.UNKNOWN_TRANSFORMER_PHASE_SHIFT, 1);
+});
+test('transformer winding connections are retained without inventing vector-group angle', () => {
+  const doc = fixture();
+  doc.TypTr2.Attributes.push('tr2cn_h', 'tr2cn_l');
+  doc.TypTr2.Values[0].push('YN', 'D');
+  const shiftIndex = doc.TypTr2.Attributes.indexOf('shift_degree');
+  if (shiftIndex >= 0) { doc.TypTr2.Attributes.splice(shiftIndex, 1); doc.TypTr2.Values[0].splice(shiftIndex, 1); }
+  const net = map(doc);
+  assert.equal(net.transformers[0].hvWindingConnection, 'YN');
+  assert.equal(net.transformers[0].lvWindingConnection, 'D');
+  assert.equal(net.transformers[0].vectorGroup, null);
+  assert.equal(net.transformers[0].phaseShiftDeg, null);
+  assert.equal(net.modelCoverage.transformerWindingConnection.available, 1);
+  assert.equal(net.modelCoverage.transformerPhaseAngle.available, 0);
 });

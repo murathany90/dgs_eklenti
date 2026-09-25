@@ -8,6 +8,7 @@ import uuid
 from . import PROTOCOL_VERSION
 from .protocol import read_message, write_message
 from .pandapower_adapter import run
+from .network_mapper import prepare
 
 MAX_MODEL_BYTES = 128 * 1024 * 1024
 RESULT_CHUNK_BYTES = 192 * 1024
@@ -61,6 +62,12 @@ def serve(reader=None, writer=None):
                 job["model"] = json.loads(job["bytes"])
                 del job["bytes"]
                 send("PROGRESS", phase="MODEL_READY")
+            elif kind == "PREFLIGHT":
+                if not job or job_id != job["id"] or not isinstance(job.get("model"), dict):
+                    raise ValueError("model not ready")
+                send("PROGRESS", phase="AC_PREFLIGHT")
+                job["prepared"], job["diagnostics"] = prepare(job["model"])
+                send("DIAGNOSTICS", diagnostics=job["diagnostics"])
             elif kind == "RUN_LOAD_FLOW":
                 if not job or job_id != job["id"] or not isinstance(job.get("model"), dict):
                     raise ValueError("model not ready")
@@ -68,14 +75,14 @@ def serve(reader=None, writer=None):
                 if mode not in ("AC", "DC"):
                     raise ValueError("invalid load flow mode")
                 send("PROGRESS", phase="CONVERTING")
-                result = run(job["model"], mode)
+                result = run(job["model"], mode, job.get("prepared"), job.get("diagnostics"))
                 send("PROGRESS", phase="SERIALIZING")
                 started = time.perf_counter()
                 payload = json.dumps(result, separators=(",", ":"), allow_nan=False).encode("utf-8")
                 serial_ms = (time.perf_counter() - started) * 1000
                 chunks = (len(payload) + RESULT_CHUNK_BYTES - 1) // RESULT_CHUNK_BYTES
                 send("RESULT_SUMMARY", chunkCount=chunks, byteLength=len(payload), sha256=hashlib.sha256(payload).hexdigest(),
-                     convergence=result["convergence"], validation=result["validation"], summary=result["summary"],
+                     convergence=result["convergence"], validation=result["validation"], summary=result["summary"], diagnostics=result.get("preflight"),
                      performance={**result["performance"], "serializationMs": serial_ms})
                 for index in range(chunks):
                     part = payload[index * RESULT_CHUNK_BYTES:(index + 1) * RESULT_CHUNK_BYTES]

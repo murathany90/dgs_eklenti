@@ -10,7 +10,27 @@ export interface BranchResult extends ResultBase { kind: 'LINE' | 'SERIES_COMPEN
 export interface TransformerResult extends ResultBase { hvBus: string | null; lvBus: string | null; hv: BranchEndResult; lv: BranchEndResult; loadingPercent: number | null; pLossMw: number | null; qLossMvar: number | null; tapPosition: number | null }
 export interface GeneratorResult extends ResultBase { bus: string | null; powerFactoryClass?: 'ElmSym' | 'ElmGenStat'; pMw: number | null; qMvar: number | null; vPu: number | null; limitState: 'WITHIN' | 'AT_MIN' | 'AT_MAX' | 'UNKNOWN' }
 export interface ExternalGridResult extends ResultBase { bus: string | null; pMw: number | null; qMvar: number | null }
-export interface NetworkSummary { generationMw: number | null; generationMvar: number | null; loadMw: number | null; loadMvar: number | null; activeLossMw: number | null; reactiveLossMvar: number | null; busCount: number; lineCount: number; transformerCount: number; solveMs: number | null; mode: 'AC' | 'DC' }
+export interface NetworkSummary {
+  generationMw: number | null; generationMvar: number | null; loadMw: number | null; loadMvar: number | null;
+  activeLossMw: number | null; reactiveLossMvar: number | null; busCount: number; lineCount: number; transformerCount: number;
+  modelBusCount?: number; modelLineCount?: number; modelTransformerCount?: number;
+  mappedBusCount?: number; mappedLineCount?: number; mappedTransformerCount?: number;
+  solveMs: number | null; mode: 'AC' | 'DC';
+}
+export interface ACPreflightDiagnostics {
+  modelCounts: { bus: number; line: number; transformer: number; generator: number };
+  mappedCounts: { bus: number; line: number; transformer: number; generator: number };
+  elementsNotMapped: number; notMappedByKind: Array<{ kind: string; model: number; mapped: number; notMapped: number }>;
+  electricalIslandCount: number; islandsWithSlackCount: number; islandsWithoutSlackCount: number; unsuppliedBusCount: number;
+  inServiceBusCount: number; externalGridCount: number; generationMw: number; loadMw: number; initialPImbalanceMw: number;
+  pvBusCount: number; pqBusCount: number; pvUnitCount: number; pvUnitsMissingQLimits: number; pvUnitsWithQLimits: number;
+  pvUnitsInvalidVoltageSetpoint: number; minVmSetpointPu: number | null; maxVmSetpointPu: number | null;
+  transformerTapOutsideDeclaredLimits: number; transformerTapDeviationAbsGreaterThan10: number;
+  transformerPhaseAngleMissing: number; transformerWindingConnectionMissing: number;
+  unsupportedOrUnsolvedControlCount: number; openSwitchCount: number; closedSwitchCount: number;
+  zeroImpedanceCount: number; nonFiniteValueCount: number; negativeReactanceCount: number; verySmallReactanceCount: number;
+  candidateNonPositiveCompensatedPathCount: number; candidatePathRule: string; unsupportedConversionCount: number;
+}
 export interface UnsupportedResult { kind: string; id: string; reason: string }
 export interface ResultSet {
   schemaVersion: '2.0'; engine: string; engineVersion: string; modelId: string; modelHash: string; timestamp: string;
@@ -19,7 +39,7 @@ export interface ResultSet {
   validation: Integrity; warnings: string[]; unsupported: UnsupportedResult[];
   buses: BusResult[]; branches: BranchResult[]; transformers: TransformerResult[]; generators: GeneratorResult[];
   externalGrids: ExternalGridResult[]; losses: Array<{ id: string; pMw: number | null; qMvar: number | null }>;
-  summary: NetworkSummary;
+  summary: NetworkSummary; preflight?: ACPreflightDiagnostics;
   performance?: { conversionMs: number; solveMs: number; serializationMs?: number };
 }
 

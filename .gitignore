@@ -11,3 +11,4 @@ kontrol1/
 *.log
 playwright-report/
 test-results/
+artifacts/

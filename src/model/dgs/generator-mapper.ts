@@ -7,10 +7,18 @@ export function mapGenerators(ctx: DgsContext): CanonicalGenerator[] {
     const id = reference(row.FID); if (!id) continue;
     const bus = ctx.busFromCubic(row.bus1);
     const type = cls === 'ElmSym' ? ctx.get('TypSym', row.typ_id) : null;
-    const qMinMvar = numeric(row.cQ_min) ?? numeric(type?.Q_min);
-    const qMaxMvar = numeric(row.cQ_max) ?? numeric(type?.Q_max);
-    if (cls === 'ElmSym' && numeric(row.cQ_min) === null && qMinMvar !== null) ctx.finding('GENERATOR_TYPE_Q_LIMIT', 'INFO', id, 'ElmSym Q alt sınırı TypSym.Q_min tür alanından alındı');
-    if (cls === 'ElmSym' && numeric(row.cQ_max) === null && qMaxMvar !== null) ctx.finding('GENERATOR_TYPE_Q_LIMIT', 'INFO', id, 'ElmSym Q üst sınırı TypSym.Q_max tür alanından alındı');
+    const rowQMin = numeric(row.cQ_min), rowQMax = numeric(row.cQ_max);
+    const typeQMin = cls === 'ElmSym' ? numeric(type?.Q_min) : null;
+    const typeQMax = cls === 'ElmSym' ? numeric(type?.Q_max) : null;
+    const qMinMvar = rowQMin ?? typeQMin, qMaxMvar = rowQMax ?? typeQMax;
+    const qLimitSource = rowQMin !== null && rowQMax !== null ? `${cls}.cQ_min/cQ_max`
+      : typeQMin !== null && typeQMax !== null ? 'TypSym.Q_min/Q_max' : null;
+    if (cls === 'ElmSym' && rowQMin === null && typeQMin !== null) ctx.finding('GENERATOR_TYPE_Q_LIMIT', 'INFO', id, 'Alt Q sınırı TipSenkrMak.Q_min alanından alındı');
+    if (cls === 'ElmSym' && rowQMax === null && typeQMax !== null) ctx.finding('GENERATOR_TYPE_Q_LIMIT', 'INFO', id, 'Üst Q sınırı TipSenkrMak.Q_max alanından alındı');
+    if (cls === 'ElmGenStat' && (qMinMvar === null || qMaxMvar === null)) {
+      // iOPFCQmin/iOPFCQmax are option fields in this export; they do not carry Mvar limits.
+      ctx.finding('STATIC_GENERATOR_Q_LIMITS_UNAVAILABLE', 'WARNING', id, 'Üretim ekipmanı Q sınırı bulunmuyor; iOPFCQmin/iOPFCQmax seçenek alanları Mvar sınırı olarak yorumlanmadı');
+    }
     const mode = String(row.av_mode ?? '').toLowerCase();
     const controlMode = mode === 'constv' ? 'PV' : mode === 'constq' ? 'PQ' : 'UNKNOWN';
     if (!bus) ctx.finding('MISSING_GENERATOR_BUS', 'ERROR', id, `${cls}.bus1 çözümlenemedi`);
@@ -21,7 +29,7 @@ export function mapGenerators(ctx: DgsContext): CanonicalGenerator[] {
     if (numeric(row.ip_ctrl) && numeric(row.ip_ctrl) !== 0) ctx.finding('REMOTE_VOLTAGE_CONTROL_UNRESOLVED', 'APPROXIMATION', id, 'Uzak kontrol barası referansı çözülmedi');
     result.push({ id, name: String(row.loc_name ?? id), sourceRefs: { powerFactoryClass: cls, fid: id, typeFid: reference(row.typ_id) ?? undefined }, inService: inService(row.outserv), bus,
       pMw: numeric(row.pgini), qMvar: numeric(row.qgini), vmPu: numeric(row.usetp), pMinMw: numeric(row.Pmin_uc), pMaxMw: numeric(row.Pmax_uc),
-      qMinMvar, qMaxMvar, controlMode, remoteControlBus: null, participationFactor: null, droop: null });
+      qMinMvar, qMaxMvar, controlMode, remoteControlBus: null, participationFactor: null, droop: null, qLimitSource });
   }
   return result;
 }

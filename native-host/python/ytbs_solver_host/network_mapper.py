@@ -183,3 +183,155 @@ def convert(model):
         ids["impedance"][item["id"]] = pp.create_impedance(net, ids["bus"][item["fromBus"]], ids["bus"][item["toBus"]],
             rft_pu=0.0, xft_pu=item["xOhm"] / zbase, sn_mva=net.sn_mva, name=item.get("name"), in_service=item.get("inService") is True)
     return net, ids, unsupported, (time.perf_counter() - started) * 1000
+
+
+def prepare(model):
+    """Convert once for both preflight reporting and the subsequent solve."""
+    net, ids, unsupported, conversion_ms = convert(model)
+    return (net, ids, unsupported, conversion_ms), preflight(model, net, ids, unsupported)
+
+
+def preflight(model, net=None, ids=None, unsupported=None):
+    """Return bounded, model-grounded AC diagnostics; no numerical solution is produced."""
+    if ids is None:
+        net, ids, unsupported, _ = convert(model)
+    unsupported = unsupported or []
+    def num(value):
+        return value if _number(value) else None
+    def count_map(model_key, id_map):
+        total = len(model.get(model_key, []))
+        mapped = len(id_map)
+        return {"kind": model_key, "model": total, "mapped": mapped, "notMapped": max(0, total - mapped)}
+
+    bus_ids = {item.get("id") for item in model.get("buses", []) if item.get("id") in ids["bus"] and item.get("inService") is True}
+    adjacency = {bus_id: set() for bus_id in bus_ids}
+    def connect(items, id_map, a_key, b_key, require_closed=False):
+        for item in items:
+            a, b = item.get(a_key), item.get(b_key)
+            if item.get("id") not in id_map or item.get("inService") is not True or (require_closed and item.get("closed") is not True):
+                continue
+            if a in adjacency and b in adjacency:
+                adjacency[a].add(b); adjacency[b].add(a)
+    connect(model.get("lines", []), ids["line"], "fromBus", "toBus")
+    connect(model.get("transformers", []), ids["trafo"], "hvBus", "lvBus")
+    connect(model.get("seriesCompensators", []), ids["impedance"], "fromBus", "toBus")
+    connect(model.get("switches", []), ids["switch"], "fromBus", "toBus", True)
+
+    slack_buses = {item.get("bus") for item in model.get("externalGrids", [])
+                   if item.get("id") in ids["ext_grid"] and item.get("inService") is True and item.get("bus") in bus_ids}
+    unseen = set(bus_ids)
+    islands, islands_with_slack, unsupplied_buses = 0, 0, 0
+    while unseen:
+        islands += 1
+        stack = [unseen.pop()]
+        component = set(stack)
+        while stack:
+            current = stack.pop()
+            for neighbor in adjacency[current]:
+                if neighbor in unseen:
+                    unseen.remove(neighbor); component.add(neighbor); stack.append(neighbor)
+        if component & slack_buses:
+            islands_with_slack += 1
+        else:
+            unsupplied_buses += len(component)
+
+    in_service_gens = [item for item in model.get("generators", []) if item.get("id") in ids["gen"] or item.get("id") in ids["sgen"]]
+    in_service_gens = [item for item in in_service_gens if item.get("inService") is True]
+    loads = [item for item in model.get("loads", []) if item.get("id") in ids["load"] and item.get("inService") is True]
+    total_gen_mw = sum(num(item.get("pMw")) or 0.0 for item in in_service_gens)
+    total_load_mw = sum(num(item.get("pMw")) or 0.0 for item in loads)
+    pv_buses = {item.get("bus") for item in in_service_gens if item.get("controlMode") == "PV" and item.get("bus") in bus_ids}
+    pq_buses = bus_ids - pv_buses - slack_buses
+    pv_units = [item for item in in_service_gens if item.get("controlMode") == "PV"]
+    q_missing_pv = sum(not (_number(item.get("qMinMvar")) and _number(item.get("qMaxMvar"))) for item in pv_units)
+    valid_vm = [item["vmPu"] for item in pv_units if _number(item.get("vmPu")) and 0.5 <= item["vmPu"] <= 1.5]
+    invalid_vm = sum(not (_number(item.get("vmPu")) and 0.5 <= item["vmPu"] <= 1.5) for item in pv_units)
+
+    trafos = model.get("transformers", [])
+    taps_outside = 0
+    taps_extreme = 0
+    for item in trafos:
+        tap = num(item.get("tapPosition")); neutral = num(item.get("tapNeutral")); low = num(item.get("tapMin")); high = num(item.get("tapMax"))
+        if tap is None:
+            continue
+        if low is not None and tap < low or high is not None and tap > high:
+            taps_outside += 1
+        if neutral is not None and abs(tap - neutral) > 10:
+            taps_extreme += 1
+
+    switch_items = model.get("switches", [])
+    switch_closed = sum(item.get("inService") is True and item.get("closed") is True for item in switch_items)
+    switch_open = sum(item.get("inService") is True and item.get("closed") is not True for item in switch_items)
+    controls = model.get("controls", [])
+    unsupported_controls = sum(item.get("support") != "SUPPORTED" or item.get("mappingStatus") == "MAPPED_BUT_NOT_SOLVED" for item in controls)
+
+    not_mapped = [
+        count_map("buses", ids["bus"]), count_map("lines", ids["line"]), count_map("transformers", ids["trafo"]),
+        count_map("generators", {**ids["gen"], **ids["sgen"]}), count_map("loads", ids["load"]),
+        count_map("shunts", ids["shunt"]), count_map("seriesCompensators", ids["impedance"]),
+        count_map("externalGrids", ids["ext_grid"]), count_map("switches", ids["switch"]),
+    ]
+    model_elements_not_mapped = sum(item["notMapped"] for item in not_mapped)
+    active_lines = [item for item in model.get("lines", []) if item.get("inService") is True]
+    series = [item for item in model.get("seriesCompensators", []) if item.get("inService") is True]
+    impedance_zero = sum((_number(item.get("rOhm")) and _number(item.get("xOhm")) and abs(item["rOhm"]) + abs(item["xOhm"]) == 0) for item in active_lines)
+    impedance_zero += sum((_number(item.get("xOhm")) and item["xOhm"] == 0) for item in series)
+    impedance_zero += sum((_number(item.get("vkPercent")) and item["vkPercent"] == 0) for item in trafos)
+    negative_x = sum(_number(item.get("xOhm")) and item["xOhm"] < 0 for item in active_lines + series)
+    very_small_x = 0
+    for item in active_lines:
+        kv, x = num(item.get("nominalKv")), num(item.get("xOhm"))
+        if kv and x is not None and 0 < abs(x * 100.0 / (kv * kv)) < 1e-5:
+            very_small_x += 1
+    for item in series:
+        kv, x = num(item.get("nominalKv")), num(item.get("xOhm"))
+        if kv and x is not None and 0 < abs(x * 100.0 / (kv * kv)) < 1e-5:
+            very_small_x += 1
+    by_pair = {}
+    def pair_key(item):
+        a, b = item.get("fromBus"), item.get("toBus")
+        return tuple(sorted((a, b))) if isinstance(a, str) and isinstance(b, str) else None
+    for item in active_lines:
+        pair = pair_key(item)
+        if pair is None: continue
+        by_pair.setdefault(pair, {"lineX": 0.0, "seriesX": 0.0, "hasSeries": False})["lineX"] += num(item.get("xOhm")) or 0.0
+    for item in series:
+        pair = pair_key(item)
+        if pair is None: continue
+        by_pair.setdefault(pair, {"lineX": 0.0, "seriesX": 0.0, "hasSeries": False})["seriesX"] += num(item.get("xOhm")) or 0.0
+        by_pair[pair]["hasSeries"] = True
+    nonpositive_compensated_paths = sum(entry["hasSeries"] and entry["lineX"] + entry["seriesX"] <= 0 for entry in by_pair.values())
+
+    def non_finite(value):
+        if isinstance(value, float): return not math.isfinite(value)
+        if isinstance(value, dict): return sum(non_finite(part) for part in value.values())
+        if isinstance(value, list): return sum(non_finite(part) for part in value)
+        return 0
+    non_finite_count = non_finite(model)
+    ext_count = sum(item.get("inService") is True and item.get("id") in ids["ext_grid"] for item in model.get("externalGrids", []))
+    winding_missing = sum(not (item.get("hvWindingConnection") and item.get("lvWindingConnection")) for item in trafos)
+
+    return {
+        "modelCounts": {"bus": len(model.get("buses", [])), "line": len(model.get("lines", [])), "transformer": len(trafos), "generator": len(model.get("generators", []))},
+        "mappedCounts": {"bus": len(ids["bus"]), "line": len(ids["line"]), "transformer": len(ids["trafo"]), "generator": len(ids["gen"]) + len(ids["sgen"])},
+        "elementsNotMapped": model_elements_not_mapped, "notMappedByKind": not_mapped,
+        "electricalIslandCount": islands, "islandsWithSlackCount": islands_with_slack,
+        "islandsWithoutSlackCount": islands - islands_with_slack, "unsuppliedBusCount": unsupplied_buses,
+        "inServiceBusCount": len(bus_ids), "externalGridCount": ext_count,
+        "generationMw": total_gen_mw, "loadMw": total_load_mw,
+        "initialPImbalanceMw": total_gen_mw - total_load_mw,
+        "pvBusCount": len(pv_buses), "pqBusCount": len(pq_buses), "pvUnitCount": len(pv_units),
+        "pvUnitsMissingQLimits": q_missing_pv, "pvUnitsWithQLimits": len(pv_units) - q_missing_pv,
+        "pvUnitsInvalidVoltageSetpoint": invalid_vm,
+        "minVmSetpointPu": min(valid_vm) if valid_vm else None, "maxVmSetpointPu": max(valid_vm) if valid_vm else None,
+        "transformerTapOutsideDeclaredLimits": taps_outside, "transformerTapDeviationAbsGreaterThan10": taps_extreme,
+        "transformerPhaseAngleMissing": sum(item.get("phaseShiftDeg") is None for item in trafos),
+        "transformerWindingConnectionMissing": winding_missing,
+        "unsupportedOrUnsolvedControlCount": unsupported_controls,
+        "openSwitchCount": switch_open, "closedSwitchCount": switch_closed,
+        "zeroImpedanceCount": int(impedance_zero), "nonFiniteValueCount": int(non_finite_count),
+        "negativeReactanceCount": int(negative_x), "verySmallReactanceCount": int(very_small_x),
+        "candidateNonPositiveCompensatedPathCount": int(nonpositive_compensated_paths),
+        "candidatePathRule": "Direct bus-pair sum of mapped line X and series-compensator X; screening indicator, not a network reduction.",
+        "unsupportedConversionCount": len(unsupported),
+    }

@@ -97,7 +97,12 @@ def extract(net, ids, model, mode, unsupported, elapsed_ms):
         "externalGrids": external_grids, "losses": [{"id": "network", "pMw": loss_p, "qMvar": loss_q}],
         "summary": {"generationMw": gen_p, "generationMvar": gen_q if mode == "AC" else None, "loadMw": load_p, "loadMvar": load_q if mode == "AC" else None,
                     "activeLossMw": loss_p, "reactiveLossMvar": loss_q, "busCount": len(buses),
-                    "lineCount": len(branches), "transformerCount": len(transformers), "solveMs": elapsed_ms,
+                    "lineCount": len([item for item in model.get("lines", []) if item.get("id") in ids["line"]]),
+                    "transformerCount": len(transformers),
+                    "modelBusCount": len(model.get("buses", [])), "modelLineCount": len(model.get("lines", [])),
+                    "modelTransformerCount": len(model.get("transformers", [])),
+                    "mappedBusCount": len(ids["bus"]), "mappedLineCount": len(ids["line"]), "mappedTransformerCount": len(ids["trafo"]),
+                    "solveMs": elapsed_ms,
                     "mode": mode}}
 
 

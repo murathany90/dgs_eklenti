@@ -9,7 +9,7 @@ from unittest.mock import patch
 from pandapower.auxiliary import LoadflowNotConverged
 
 from ytbs_solver_host.main import serve
-from ytbs_solver_host.network_mapper import convert
+from ytbs_solver_host.network_mapper import convert, preflight, prepare
 from ytbs_solver_host.pandapower_adapter import run
 from ytbs_solver_host.protocol import read_message, write_message
 
@@ -111,6 +111,38 @@ class ElectricalTests(unittest.TestCase):
         self.assertEqual(result["validation"], "PARTIAL")
         self.assertTrue(any(item["kind"] == "trafo_phase_shift" for item in result["unsupported"]))
 
+    def test_preflight_island_supply_q_limits_and_model_counts(self):
+        model = base(3); line(model, 0, 1); load(model, 1, 20, 5); load(model, 2, 7, 2)
+        model["generators"].append({"id": "G", "bus": "B1", "pMw": 10, "qMvar": 0, "vmPu": 1.02,
+            "qMinMvar": None, "qMaxMvar": None, "controlMode": "PV", "inService": True})
+        model["transformers"].append({"id": "T", "hvBus": "B1", "lvBus": "B2", "snMva": 100, "vnHvKv": 110,
+            "vnLvKv": 110, "vkPercent": 10, "vkrPercent": 1, "tapPosition": 15, "tapNeutral": 3,
+            "tapMin": 0, "tapMax": 20, "inService": False})
+        diagnostic = preflight(model)
+        self.assertEqual(diagnostic["modelCounts"]["bus"], 3)
+        self.assertEqual(diagnostic["mappedCounts"]["bus"], 3)
+        self.assertEqual(diagnostic["electricalIslandCount"], 2)
+        self.assertEqual(diagnostic["islandsWithSlackCount"], 1)
+        self.assertEqual(diagnostic["islandsWithoutSlackCount"], 1)
+        self.assertEqual(diagnostic["unsuppliedBusCount"], 1)
+        self.assertEqual(diagnostic["pvUnitsMissingQLimits"], 1)
+        self.assertEqual(diagnostic["transformerTapOutsideDeclaredLimits"], 0)
+        self.assertEqual(diagnostic["transformerTapDeviationAbsGreaterThan10"], 1)
+        self.assertAlmostEqual(diagnostic["initialPImbalanceMw"], -17)
+
+    def test_non_convergence_preserves_model_counts_without_results(self):
+        model = base(); line(model); load(model, 1)
+        with patch("ytbs_solver_host.pandapower_adapter.pp.runpp", side_effect=LoadflowNotConverged("fixture did not converge")):
+            result = run(model, "AC")
+        self.assertEqual(result["convergence"], "NON_CONVERGED")
+        self.assertEqual(result["buses"], [])
+        self.assertEqual(result["branches"], [])
+        self.assertEqual(result["transformers"], [])
+        self.assertEqual(result["generators"], [])
+        self.assertEqual(result["summary"]["modelBusCount"], 2)
+        self.assertEqual(result["summary"]["modelLineCount"], 1)
+        self.assertGreater(result["summary"]["mappedBusCount"], 0)
+
     def test_non_converged_has_no_numeric_results(self):
         model = base(); line(model); load(model, 1)
         with patch("ytbs_solver_host.pandapower_adapter.pp.runpp", side_effect=LoadflowNotConverged("fixture did not converge")):
@@ -149,6 +181,7 @@ class ProtocolTests(unittest.TestCase):
         send("CREATE_MODEL", byteLength=len(payload), sha256=hashlib.sha256(payload).hexdigest())
         send("MODEL_CHUNK", index=0, data=base64.b64encode(payload).decode())
         send("MODEL_COMPLETE")
+        send("PREFLIGHT")
         send("RUN_LOAD_FLOW", mode="AC")
         input_stream.seek(0)
         serve(input_stream, output_stream)
@@ -156,12 +189,15 @@ class ProtocolTests(unittest.TestCase):
         messages = []
         while message := read_message(output_stream): messages.append(message)
         self.assertFalse(any(msg["type"] == "ERROR" for msg in messages))
+        diagnostic = next(msg["diagnostics"] for msg in messages if msg["type"] == "DIAGNOSTICS")
+        self.assertEqual(diagnostic["modelCounts"]["bus"], 2)
         summary = next(msg for msg in messages if msg["type"] == "RESULT_SUMMARY")
         chunks = [msg for msg in messages if msg["type"] == "RESULT_CHUNK"]
         self.assertEqual(len(chunks), summary["chunkCount"])
         result_bytes = b"".join(base64.b64decode(msg["data"]) for msg in chunks)
         self.assertEqual(hashlib.sha256(result_bytes).hexdigest(), summary["sha256"])
         self.assertEqual(json.loads(result_bytes)["convergence"], "CONVERGED")
+        self.assertEqual(json.loads(result_bytes)["summary"]["modelBusCount"], 2)
 
 
 if __name__ == "__main__": unittest.main()
