@@ -1,0 +1,39 @@
+{
+  "line_P": {
+    "reference": 287,
+    "matched": 287,
+    "mae": 16.880557302982062,
+    "rmse": 37.5476708517316,
+    "max_abs": 311.30546268724873,
+    "missing": 0
+  },
+  "bus_V": {
+    "reference": 188,
+    "matched": 188,
+    "mae": 5.196850646474949,
+    "rmse": 5.5674277819845575,
+    "max_abs": 14.45003278050001,
+    "missing": 0
+  },
+  "unit_Q": {
+    "reference": 13,
+    "matched": 0,
+    "missing": 13,
+    "missing_ids": [
+      "U3671",
+      "U368",
+      "U320",
+      "U372",
+      "U3719",
+      "U311",
+      "U375",
+      "U309",
+      "U373",
+      "U310",
+      "U374",
+      "U3605",
+      "U2152"
+    ]
+  },
+  "basis": "23.09.2026 12:00 uygulama sonuçları ile DINAMIK_RAPORLAMA_MOTORU (3)/(4)/(5) Excel analiz sütunları; hat P from terminali."
+}

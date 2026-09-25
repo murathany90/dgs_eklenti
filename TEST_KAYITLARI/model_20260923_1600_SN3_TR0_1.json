@@ -1,0 +1,46 @@
+{
+  "model": "20260923_1600_SN3_TR0(1).json",
+  "capacity": {
+    "all": 2382,
+    "covered": 2382,
+    "excel": 315,
+    "summerMatches": 315,
+    "capacityMissing": 0,
+    "sections": 1111,
+    "voltageMismatch": 0,
+    "unverifiedOperational": 55
+  },
+  "tabs": {
+    "upload": true,
+    "static": true,
+    "dynamic": true,
+    "map": true,
+    "sld": true,
+    "analysis": true,
+    "info": true,
+    "settings": true
+  },
+  "groups": {
+    "h400": {
+      "state": "on",
+      "levels": [
+        "400"
+      ]
+    },
+    "mid": {
+      "state": "on",
+      "levels": [
+        "220",
+        "154",
+        "66"
+      ]
+    },
+    "low": {
+      "state": "none",
+      "levels": []
+    }
+  },
+  "errors": [],
+  "title": "YTBS | Şebeke Görüntüleyici v5.5",
+  "flowMax": 0
+}

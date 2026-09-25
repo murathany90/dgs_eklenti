@@ -1,0 +1,16 @@
+{
+  "result": {
+    "zoom": 5.765131428181592,
+    "rows": [
+      {
+        "id": "H5846",
+        "length": 1008.3458228518139,
+        "loading": 55.55659537225311,
+        "count": 3,
+        "selected": false
+      }
+    ],
+    "status": "Akış: 74 hat · 103 ok · hat başına ≤3"
+  },
+  "errors": []
+}
