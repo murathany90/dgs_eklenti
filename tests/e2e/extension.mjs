@@ -75,6 +75,19 @@ try {
   await page.locator('[data-view="analysis"]').click();
   const metadata = await page.locator('#v6Metadata').innerText();
   if (!metadata.includes('TRANSMISSION')) throw Error('Scope label missing');
+  if (process.env.DGS_E2E_MODEL) {
+    const scope = await page.locator('#v61Scope').innerText();
+    if (!scope.includes('86479') || !scope.includes('2382')) throw Error(`Electrical full-model mapping missing: ${scope}`);
+  }
+  if (!process.env.DGS_E2E_MODEL) {
+    await page.locator('#v61Engine').selectOption('pandapower');
+    await page.locator('#v61Run').click();
+    await page.locator('#v61Status').getByText(/HOST NOT INSTALLED/).waitFor({ timeout: 15000 });
+  } else {
+    await page.locator('#v61Engine').selectOption('pandapower');
+    await page.locator('#v61Run').click();
+    await page.locator('#v61Status').getByText(/aktif senaryo değişiklikleri uygulanmaz/).waitFor({ timeout: 15000 });
+  }
   if (errors.length) throw Error(`Page errors: ${errors.join(' | ')}`);
   const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'));
   if (manifest.manifest_version !== 3) throw Error('MV3 manifest missing');

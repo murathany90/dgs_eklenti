@@ -1,6 +1,6 @@
 {
   "name": "ytbs-dgs-extension",
-  "version": "6.0.0",
+  "version": "6.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,6 +9,7 @@
     "test": "node --import tsx --test tests/unit/*.test.mjs",
     "test:integration": "node --import tsx --test tests/integration/*.test.mjs",
     "test:e2e": "node tests/e2e/extension.mjs",
+    "test:e2e:native": "node tests/e2e/native-host.mjs",
     "build": "node tools/build.mjs"
   },
   "devDependencies": {

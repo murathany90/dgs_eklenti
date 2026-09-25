@@ -115,7 +115,7 @@ function populateFilters(){if(!active)return;let area=Array.from(active.index.ge
  putText('mapLayerStats',`${nf.format(active.stats.sites)} TM · ${nf.format(active.stats.lines)} hat · ${nf.format(active.stats.geo)} koordinatlı hat · ${nf.format(active.stats.fallback)} temsili bağlantı`);
 }
 function activateModel(m){active=m;selectedLine=null;selectedSite=null;statState.page=0;dynState.page=0;statState.selected=null;dynState.selected=null;fillModelInfo();if(active){renderStatic();renderDyn();resetCamera();}else{$('summaryCards').innerHTML='';$('modelMeta').innerHTML='';$('staticTable').innerHTML='';$('dynTable').innerHTML='';$('mapSelection').textContent='Model yükleyin.';renderModelList();}if(currentView==='map')setView('map');}
-async function loadFiles(files){if(!files.length)return;$('loadProgress').classList.remove('hidden');for(let fi=0;fi<files.length;fi++){let f=files[fi];try{const step=s=>{putText('progressText',`${fi+1}/${files.length} · ${f.name} · ${s}`);status(`İşleniyor · ${f.name} · ${s}`);};step('Dosya okunuyor');await defer();const str=await f.text();step('JSON ayrıştırılıyor');await defer();let raw=await parseJSONOffMain(str,step);step('DGS sınıf ve kayıtları doğrulanıyor');await defer();let m=new DGSModel(raw,f.name,f.size);await m.init(step);auditV2(m);models.push(m);models.sort((a,b)=>a.timeKey.localeCompare(b.timeKey));activateModel(m);window.V6Bridge?.modelLoaded(m,f);notice(`Yüklendi: ${f.name} · ${nf.format(m.stats.rows)} kayıt · ${nf.format(m.stats.geo)} güzergâhlı hat.`, '');
+async function loadFiles(files){if(!files.length)return;$('loadProgress').classList.remove('hidden');for(let fi=0;fi<files.length;fi++){let f=files[fi];try{const step=s=>{putText('progressText',`${fi+1}/${files.length} · ${f.name} · ${s}`);status(`İşleniyor · ${f.name} · ${s}`);};step('Dosya okunuyor');await defer();const parsed=await parseJSONOffMain(f,step);let raw=parsed.model;step('DGS sınıf ve kayıtları doğrulanıyor');await defer();let m=new DGSModel(raw,f.name,f.size);await m.init(step);auditV2(m);models.push(m);models.sort((a,b)=>a.timeKey.localeCompare(b.timeKey));activateModel(m);window.V6Bridge?.modelLoaded(m,f,parsed);notice(`Yüklendi: ${f.name} · ${nf.format(m.stats.rows)} kayıt · ${nf.format(m.stats.geo)} güzergâhlı hat.`, '');
  }catch(e){console.error(e);notice(`Dosya yüklenemedi: ${f.name} · ${e.message}`,'bad');status('Dosya hatası · '+e.message);}await defer();}$('loadProgress').classList.add('hidden');if(active)putText('progressText','Tamamlandı');}
 $('fileInput').addEventListener('change',e=>{loadFiles(Array.from(e.target.files));e.target.value='';});$('chooseFile').onclick=e=>{e.preventDefault();$('fileInput').click();};const drop=$('filedrop');for(const ev of ['dragenter','dragover'])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag')});for(const ev of ['dragleave','drop'])drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag')});drop.addEventListener('drop',e=>loadFiles(Array.from(e.dataTransfer.files)));
 function clearAll(){models.splice(0);activateModel(null);notice('Bellekteki modeller temizlendi. Tekrar yüklemek için JSON dosyasını seçin.');}
@@ -439,7 +439,7 @@ function auditV2(m){let stats={unknownLineTypes:0,unknownTransformerTypes:0,miss
 // Expose read-only test hooks; fake/synthetic results never go into the runtime without explicit upload.
 window.YTBS_V2_TEST={state:()=>({sets:v2.sets.length,selectedSet:v2.selectedSet,metric:$('mapMetric').value,visible:(active?.lines||[]).filter(visibleLineV2).length,labels:v2.overlayCandidates.length,flowRunning:!!v2.raf,analysisKind:v2.kind,info:v2.info}),getResults:()=>v2.sets,topology:calculateTopology,latestResult,flowDirection,visibleSite,visibleLineV2,parseResultText,normalizeResults,calculateTopology};
 // Worker is an optional parser accelerator; the synchronous fallback is feature-equivalent.
-async function parseJSONOffMain(text, step) {
+async function parseJSONOffMain(file, step) {
   if (typeof Worker === 'undefined') throw Error('Parser worker kullanılamıyor.');
   const worker = new Worker(new URL('workers/parser.worker.js', document.baseURI));
   try {
@@ -449,11 +449,11 @@ async function parseJSONOffMain(text, step) {
         const data = event.data;
         if (data.type === 'PARSE_PROGRESS') { step?.(data.message); return; }
         clearTimeout(timer);
-        if (data.type === 'PARSE_COMPLETE') resolve(data.model);
+        if (data.type === 'PARSE_COMPLETE') resolve(data);
         else reject(Error(data.error || 'JSON ayrıştırılamadı'));
       };
       worker.onerror = event => { clearTimeout(timer); reject(Error(event.message || 'Parser worker hatası')); };
-      worker.postMessage({type:'LOAD_MODEL', text});
+      worker.postMessage({type:'LOAD_MODEL', file, modelId:file.name});
     });
   } finally { worker.terminate(); }
 }
