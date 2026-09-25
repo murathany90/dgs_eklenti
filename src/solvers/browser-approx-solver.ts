@@ -10,11 +10,12 @@ export class BrowserApproxSolver implements PowerSystemSolver {
     await this.runLegacy();
     const result = this.getLegacyResult();
     return {
-      engine: this.id, engineVersion: '5.5', modelId: network.modelId, modelHash: network.modelHash,
+      schemaVersion: '2.0', engine: this.id, engineVersion: '5.5', modelId: network.modelId, modelHash: network.modelHash,
       timestamp: new Date().toISOString(), topologyMode: 'BUS_BRANCH', electricalScope: 'TRANSMISSION_REDUCED',
       convergence: !result ? 'NON_CONVERGED' : result.solved === result.total ? 'CONVERGED' : 'PARTIAL',
-      validation: 'REDUCED', warnings: ['Deneysel 66 kV+ yaklaşık AC-PQ çözümü; PowerFactory sonucu değildir.'],
-      buses: [], branches: [], generators: [], transformers: [], losses: [],
+      iterations: null, maxMismatch: null, validation: 'REDUCED', warnings: ['Deneysel 66 kV+ yaklaşık AC-PQ çözümü; PowerFactory sonucu değildir.'], unsupported: [],
+      buses: [], branches: [], generators: [], transformers: [], externalGrids: [], losses: [],
+      summary: { generationMw: null, generationMvar: null, loadMw: null, loadMvar: null, activeLossMw: null, reactiveLossMvar: null, busCount: 0, lineCount: 0, transformerCount: 0, solveMs: null, mode: _options.mode },
     };
   }
 }

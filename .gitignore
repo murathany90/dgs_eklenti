@@ -1,4 +1,11 @@
 node_modules/
+.venv/
+native-host/python/.venv/
+native-host/python/ytbs-solver-host.cmd
+native-host/python/com.ytbs.powerfactory.solver.json
+*.egg-info/
+__pycache__/
+.v61-*
 dist/
 kontrol1/
 *.log

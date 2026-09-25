@@ -1,4 +1,4 @@
-name: MV3 foundation
+name: MV3 electrical core
 on:
   push:
   pull_request:
@@ -12,11 +12,17 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - run: npm ci
+      - run: python -m pip install -e native-host/python
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
       - run: npm run test:integration
+      - run: python -m unittest discover -s native-host/python/tests -v
+      - run: node --import tsx tools/benchmark-electrical.mjs docs/fixtures/dgs-smoke-from-20260923.json kontrol1/20260923_1200_SN3_TR0.json kontrol1/20260925_1000_SN5_TR0.json
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e

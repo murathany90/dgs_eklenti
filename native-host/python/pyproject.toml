@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ytbs-solver-host"
+version = "6.1.0"
+requires-python = ">=3.11"
+dependencies = ["pandapower==3.5.5"]
+
+[project.scripts]
+ytbs-solver-host = "ytbs_solver_host.main:main"
+
+[tool.setuptools.packages.find]
+include = ["ytbs_solver_host*"]

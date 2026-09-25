@@ -61,4 +61,13 @@ window.V6Legacy = {
   runAnalysis: () => startV3Solver(),
   loadFiles: files => loadFiles(files),
   openView: name => setView(name),
+  addCalculatedResult: (name, rows, metadata) => {
+    if (!active) return;
+    const set = newDgsResultSet('calculation', name, rows, metadata);
+    v2.sets.push(set);
+    v2.selectedSet = set.id;
+    listSets();
+    if (currentView === 'analysis') renderAnalysis();
+    if (currentView === 'map') drawMap();
+  },
 };
