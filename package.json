@@ -9,6 +9,7 @@
     "test": "node --import tsx --test tests/unit/*.test.mjs",
     "test:integration": "node --import tsx --test tests/integration/*.test.mjs",
     "test:e2e": "node tests/e2e/extension.mjs",
+    "test:e2e:large-model": "node tests/e2e/large-model-responsive.mjs",
     "test:e2e:native": "node tests/e2e/native-host.mjs",
     "build": "node tools/build.mjs"
   },

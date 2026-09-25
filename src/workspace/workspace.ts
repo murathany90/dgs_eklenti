@@ -1,6 +1,5 @@
-import { buildCanonicalNetwork } from '../model/canonical-network.ts';
 import type { CanonicalNetwork, DgsDocument } from '../model/types.ts';
-import { validateNetwork, type Integrity } from '../validation/validation.ts';
+import type { Integrity } from '../validation/validation.ts';
 import { putRecord, getRecord, deleteRecord, getCalculation, getCalculationHistory, saveCalculation, type PersistedCalculation } from '../storage/db.ts';
 import { BrowserApproxSolver } from '../solvers/browser-approx-solver.ts';
 import { NativeHostError, PandapowerSolver } from '../solvers/pandapower-solver.ts';
@@ -42,6 +41,9 @@ declare global { interface Window {
 const legacy = window.V6Legacy;
 let network: CanonicalNetwork | null = null;
 let modelHash = '';
+let busPickerModelHash = '';
+let electricalBusesById = new Map<string, NonNullable<CanonicalNetwork['electrical']>['buses'][number]>();
+let busSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let activeKeyGeneration = 0;
 let currentCalculationKey: CalculationKey | null = null;
 let pendingCachedCalculation: PersistedCalculation<ResultSet> | null = null;
@@ -189,7 +191,7 @@ solverPanel.innerHTML = `<div class="heading"><div><h2>Elektriksel Analiz</h2><s
   <div class="row" id="v61HostActions" hidden><button type="button" id="v61InstallHelp">Kurulum Yardımı</button><button type="button" id="v61Retry">Bağlantıyı Tekrar Kontrol Et</button><details><summary>Teknik ayrıntılar</summary><pre id="v61TechnicalError"></pre></details></div>
   <section id="v61CachePrompt" class="panel" role="dialog" aria-labelledby="v61CacheTitle" hidden><div class="heading"><h3 id="v61CacheTitle">Önceki hesap bulundu</h3></div><p id="v61CacheDescription"></p><div class="row"><button id="v61ShowCached" type="button">Mevcut sonucu göster</button><button id="v61Recalculate" class="primary" type="button">Yeniden hesapla</button></div></section>
   <div id="v61Scope" class="mini"></div>
-  <div class="row"><div class="field"><label for="v61BusSelect">Bara sonucu ve kullanılabilirlik nedeni</label><select id="v61BusSelect"><option value="">Bara seçin</option></select></div><div id="v61BusAvailability" class="notice" role="status">Bara seçilmedi.</div></div>
+  <div class="row"><div class="field"><label for="v61BusSearch">Bara adı veya kimliği ile ara</label><input id="v61BusSearch" type="search" placeholder="Örn. H4025 / İSTANBUL"></div><div class="field"><label for="v61BusSelect">Bara sonucu ve kullanılabilirlik nedeni</label><select id="v61BusSelect"><option value="">Bara seçin</option></select></div><div id="v61BusAvailability" class="notice" role="status">Bara seçilmedi.</div></div>
   <div id="v61Preflight" class="panel" hidden><div class="heading"><div><h3>AC Ön Kontrol Tanıları</h3><span class="sub">Model dönüştürmesinden alınan bağlantı ve kontrol özeti</span></div><details id="v61PreflightDetails"><summary>Yakınsamama Ayrıntıları</summary><div id="v61PreflightGrid" class="preflightGrid"></div><details><summary>Tanı JSON'u · teknik ayrıntı</summary><pre id="v61PreflightJson" class="rawpre"></pre></details></details></div></div>
   <section id="v61NonConvergence" class="notice bad" hidden></section><section id="v61DcSuccess" class="notice" hidden></section>
   <details id="v61HistoryDetails"><summary>Son hesaplamalar</summary><ol id="v61History"></ol></details>
@@ -313,24 +315,21 @@ function renderBusAvailability(): void {
   const picker = solverPanel.querySelector<HTMLSelectElement>('#v61BusSelect');
   const output = solverPanel.querySelector<HTMLElement>('#v61BusAvailability');
   if (!picker || !output) return;
-  const sourceBuses = network?.terminals ?? [];
   const buses = network?.electrical?.buses ?? [];
-  const selected = picker.value;
-  picker.replaceChildren(new Option('Bara seçin', ''), ...sourceBuses.map(bus => {
-    const mapped = buses.find(item => item.id === bus.id);
-    return new Option(`${bus.name || bus.id} · ${mapped?.nominalKv ?? '?'} kV`, bus.id);
-  }));
-  if (sourceBuses.some(bus => bus.id === selected)) picker.value = selected;
-  const sourceBus = sourceBuses.find(item => item.id === picker.value);
-  if (!sourceBus) { output.textContent = 'Bara seçilmedi.'; return; }
-  const bus = buses.find(item => item.id === sourceBus.id);
+  if (network && busPickerModelHash !== network.modelHash) {
+    busPickerModelHash = network.modelHash;
+    electricalBusesById = new Map(buses.map(bus => [bus.id, bus]));
+    fillBusOptions('');
+  }
+  const bus = electricalBusesById.get(picker.value);
+  if (!bus) { output.textContent = 'Bara seçilmedi.'; return; }
   const result = analysisState.activeResult;
-  const row = result?.buses.find(item => item.id === sourceBus.id);
+  const row = result?.buses.find(item => item.id === bus.id);
   const reason = busAvailability(result, {
-    inService: bus?.inService ?? Number(sourceBus.source.outserv ?? 0) !== 1,
+    inService: bus.inService,
     mapped: !!bus,
-    inScope: analysisState.activeEngine === 'pandapower' || (bus?.nominalKv ?? 0) >= 66,
-    supplied: !result?.preflight?.unsuppliedBusIds?.includes(sourceBus.id),
+    inScope: analysisState.activeEngine === 'pandapower' || (bus.nominalKv ?? 0) >= 66,
+    supplied: !result?.preflight?.unsuppliedBusIds?.includes(bus.id),
     metric: 'voltage', numericValue: row?.vKv,
   });
   const voltage = reason === 'AVAILABLE' ? `${fmt(row?.vKv)} kV` : '—';
@@ -339,6 +338,24 @@ function renderBusAvailability(): void {
   output.textContent = `Gerilim: ${voltage}\nNeden: ${availabilityText[reason]}\nAçı: ${angle}${angleReason ? ` · ${angleReason}` : ''}`;
   output.dataset.reason = reason;
 }
+function fillBusOptions(query: string): void {
+  const picker = solverPanel.querySelector<HTMLSelectElement>('#v61BusSelect');
+  if (!picker) return;
+  const buses = network?.electrical?.buses ?? [];
+  const needle = query.trim().toLocaleLowerCase('tr-TR');
+  const matches = needle ? buses.filter(bus => bus.id.toLocaleLowerCase('tr-TR').includes(needle) || bus.name.toLocaleLowerCase('tr-TR').includes(needle)) : buses;
+  const visible = matches.slice(0, 500);
+  const label = needle ? `${nf.format(matches.length)} eşleşme · ilk ${nf.format(visible.length)}` : `İlk ${nf.format(visible.length)} / ${nf.format(matches.length)} bara · arama yazın`;
+  const fragment = document.createDocumentFragment();
+  fragment.append(new Option(`Bara seçin · ${label}`, ''));
+  for (const bus of visible) fragment.append(new Option(`${bus.name || bus.id} · ${bus.nominalKv ?? '?'} kV`, bus.id));
+  picker.replaceChildren(fragment);
+}
+solverPanel.querySelector<HTMLInputElement>('#v61BusSearch')!.addEventListener('input', event => {
+  if (busSearchTimer) clearTimeout(busSearchTimer);
+  const query = (event.currentTarget as HTMLInputElement).value;
+  busSearchTimer = setTimeout(() => fillBusOptions(query), 150);
+});
 function renderMetadata(): void {
   const result = analysisState.activeResult;
   const electrical = network?.electrical;
@@ -707,8 +724,14 @@ function renderScenario(): void {
 
 function topologyInWorker(model: CanonicalNetwork): void {
   const worker = new Worker(new URL('workers/topology.worker.js', document.baseURI));
-  const nodes = model.terminals.map(item => item.id);
-  const edges = [...model.lines, ...model.switches].filter(item => item.terminals.length >= 2).map(item => [item.terminals[0], item.terminals[1]] as [string, string]);
+  const electrical = model.electrical;
+  const nodes = electrical?.buses.map(item => item.id) ?? [];
+  const edges = [
+    ...(electrical?.lines ?? []).map(item => [item.fromBus, item.toBus]),
+    ...(electrical?.switches ?? []).map(item => [item.fromBus, item.toBus]),
+    ...(electrical?.transformers ?? []).map(item => [item.hvBus, item.lvBus]),
+    ...(electrical?.seriesCompensators ?? []).map(item => [item.fromBus, item.toBus]),
+  ].filter((edge): edge is [string, string] => !!edge[0] && !!edge[1]);
   worker.onmessage = (event: MessageEvent<{ type: string; components?: number }>) => {
     if (event.data.type === 'TOPOLOGY_COMPLETE') { metadata.dataset.components = String(event.data.components); worker.terminate(); }
     if (event.data.type === 'TOPOLOGY_ERROR') worker.terminate();
@@ -716,33 +739,47 @@ function topologyInWorker(model: CanonicalNetwork): void {
   worker.postMessage({ type: 'BUILD_TOPOLOGY', nodes, edges });
 }
 async function onModelLoaded(model: LegacyModel, file: File, parsed: ParsedModel): Promise<void> {
-  modelHash = parsed.modelHash;
-  network = buildCanonicalNetwork(model.raw, model.rid, modelHash, 'FULL');
+  const loadedModelHash = parsed.modelHash;
+  modelHash = loadedModelHash;
+  // Keep one electrical representation on the analysis path. The full DGS remains in the legacy model;
+  // constructing a second all-equipment registry here duplicated hundreds of thousands of records.
+  network = {
+    modelId: model.rid, modelHash: loadedModelHash, scope: 'FULL', electrical: undefined,
+    substations: [], voltageLevels: [], buses: [], terminals: [], switches: [], lines: [], transformers: [],
+    generators: [], loads: [], shunts: [], seriesCompensators: [], externalGrids: [], measurements: [], controls: [],
+  };
   parsed.electrical.modelId = model.rid;
   network.electrical = parsed.electrical;
-  analysisState.integrity = validateNetwork(network, model.raw).integrity;
+  const integrity: Integrity = parsed.electrical.completeness === 'PARTIAL' ? 'PARTIAL' : 'COMPLETE_UNVALIDATED';
+  const check = { integrity, findings: parsed.electrical.findings };
+  analysisState.integrity = integrity;
   analysisState.calculationsByKey.clear(); analysisState.referenceResult = null;
   analysisState.activeResult = null; analysisState.activeCalculationKeyId = null; currentCalculationKey = null; analysisState.preflight = null;
-  await putRecord('models', { id: modelHash, name: file.name, file, savedAt: Date.now() });
-  const check = validateNetwork(network, model.raw);
-  await putRecord('canonical', { id: modelHash, electrical: parsed.electrical, integrity: check.integrity, findings: check.findings, timings: parsed.timings, savedAt: Date.now() });
-  analysisState.calculationHistory = await getCalculationHistory(modelHash, 20);
+  document.querySelector('#v6Validation')?.remove();
+  const panel = document.createElement('section'); panel.id = 'v6Validation'; panel.className = 'panel'; panel.dataset.modelName = file.name;
+  const heading = document.createElement('h3'); heading.textContent = 'Model kontrolü';
+  const summary = document.createElement('p'); summary.textContent = 'Model kontrolleri tamamlanıyor…';
+  panel.append(heading, summary); upload.append(panel);
+  analysisState.calculationHistory = await getCalculationHistory(loadedModelHash, 20);
+  if (modelHash !== loadedModelHash) return;
   renderHistory();
-  const savedScenario = await getRecord<{ snapshot: Partial<ScenarioPayload> }>('scenarios', `${modelHash}:latest`);
+  const savedScenario = await getRecord<{ snapshot: Partial<ScenarioPayload> }>('scenarios', `${loadedModelHash}:latest`);
+  if (modelHash !== loadedModelHash) return;
   legacy.restoreScenario?.(savedScenario?.snapshot ?? { lines: [], switches: [], restoredTerminals: [], autoRestoreTerminals: false });
   topologyInWorker(network);
   void updateActiveResult(); renderMetadata(); renderScope(); renderComparison(); renderScenario();
   updateStatus(`${file.name} modeli hazır · ${nf.format(parsed.electrical.buses.length)} bara · AC/DC hesap bekliyor.`);
-  document.querySelector('#v6Validation')?.remove();
-  const panel = document.createElement('section'); panel.id = 'v6Validation'; panel.className = 'panel'; panel.dataset.modelName = file.name;
-  const heading = document.createElement('h3'); heading.textContent = 'Model kontrolü';
-  const summary = document.createElement('p');
   const station = parsed.electrical.modelCoverage.stationControls;
   const qCoverage = parsed.electrical.modelCoverage.elmGenStatQLimits;
-  summary.textContent = `${check.findings.length} genel ve ${parsed.electrical.findings.length} elektriksel bildirim · ${parsed.electrical.completeness === 'COMPLETE' ? 'eşleme hazır' : 'kısmi eşleme'} · ${station.total} istasyon kontrolü korundu · statik üretimde Q sınırı ${qCoverage.available}/${qCoverage.total}.`;
-  panel.append(heading, summary); upload.append(panel);
+  summary.textContent = `${nf.format(model.stats.rows)} kaynak kaydı incelendi · ${parsed.electrical.findings.length} elektriksel bildirim · ${parsed.electrical.completeness === 'COMPLETE' ? 'eşleme hazır' : 'kısmi eşleme'} · ${station.total} istasyon kontrolü korundu · statik üretimde Q sınırı ${qCoverage.available}/${qCoverage.total}.`;
   const quality = document.querySelector<HTMLElement>('#qualitySummary');
   if (quality) quality.textContent = `${nf.format(model.stats.geo)} hat model güzergâhıyla; ${nf.format(model.stats.fallback)} hat temsili bağlantıyla gösterilebilir. ${nf.format(model.stats.rows)} kaynak kaydı denetlendi. Elektriksel eşleme: ${parsed.electrical.completeness === 'COMPLETE' ? 'tam' : 'kısmi'}.`;
+  setTimeout(() => {
+    void Promise.all([
+      putRecord('models', { id: loadedModelHash, name: file.name, file, savedAt: Date.now() }),
+      putRecord('canonical', { id: loadedModelHash, electrical: parsed.electrical, integrity: check.integrity, findings: check.findings, timings: parsed.timings, savedAt: Date.now() })
+    ]).catch(error => { console.warn('Model cache:', error); if (modelHash === loadedModelHash) updateStatus('Model açıldı; yerel önbellek yazılamadı.', 'warn'); });
+  }, 0);
 }
 window.V6Bridge = {
   modelLoaded: (model, file, parsed) => { void onModelLoaded(model, file, parsed).catch(error => { console.error('Model cache:', error); updateStatus('Model özeti kaydedilemedi.', 'warn'); }); },

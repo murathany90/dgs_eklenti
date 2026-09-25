@@ -37,6 +37,15 @@ npm run build
 5. **Senaryo** sekmesinden **Senaryoyu sıfırla** düğmesine basın. Özet sıfır etkin değişiklik göstermeli.
 6. Model dosyasını tekrar seçin. Senaryo boş kalmalı. Aynı dosyanın aynı senaryo durumuyla tekrar hesaplanması önceki sonucu önbellekten önermelidir.
 
+Büyük DGS JSON açıldığında AC-PQ yaklaşık hesabı kendiliğinden başlamaz; model açıldıktan sonra **Analiz** sekmesinde siz başlatabilirsiniz. Analiz ekranındaki bara alanı ilk 500 barayı gösterir; ada göre arama tüm eşleşmeleri listeler. Tam yerel model ile yükleme/sekme yanıtını ölçmek için:
+
+```powershell
+$env:DGS_E2E_MODEL = (Resolve-Path .\yol\tam-model.json).Path
+npm run test:e2e:large-model
+```
+
+Bu test yükleme tamamlandıktan sonra Harita, Tek Hat Şeması, Analiz, Senaryo ve Model sekmelerini tıklar; bara aramasını ve otomatik hesap başlatılmadığını doğrular.
+
 E2E testi ayrıca sanal devreye alınan iki terminali IndexedDB'ye yazıp modeli yeniden yükleyerek geri geldiğini denetler. Native host paketi kurulur; Chrome Native Messaging kaydı, Chrome'daki unpacked extension ID'sine özeldir. DC/AC yerel hesap denemek için çalışma alanındaki **Kurulum Yardımı** bölümünün verdiği Extension ID ile `native-host/python/scripts/install-windows.ps1` komutunu ayrıca çalıştırın ve Chrome'u yeniden başlatın.
 
 ## Doğrulama komutları
