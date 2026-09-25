@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "YTBS DGS Şebeke Görüntüleyici",
+  "version": "6.0.0",
+  "description": "PowerFactory DGS modelini yerel olarak görüntüler ve yaklaşık analiz eder.",
+  "action": { "default_title": "YTBS çalışma alanı" },
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "permissions": ["sidePanel", "storage"]
+}

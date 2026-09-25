@@ -1,0 +1,20 @@
+{
+  "name": "ytbs-dgs-extension",
+  "version": "6.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "node tools/lint.mjs",
+    "test": "node --import tsx --test tests/unit/*.test.mjs",
+    "test:integration": "node --import tsx --test tests/integration/*.test.mjs",
+    "test:e2e": "node tests/e2e/extension.mjs",
+    "build": "node tools/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "playwright": "^1.55.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0"
+  }
+}

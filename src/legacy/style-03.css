@@ -1,0 +1,38 @@
+
+/* v5: semantic visual layer only; preserve source FIDs and calculations. */
+:root{--v5-accent:#49c2cb} .apphead{padding:10px 22px}.apphead h1{font-size:18px;letter-spacing:-.025em}.modelhead{font-size:12px}
+#view-static>.heading .sub,#view-dynamic>.heading .sub,#view-map>.heading .sub,#view-sld>.heading .sub{display:none}
+#view-static .heading h2,#view-dynamic .heading h2,#view-map .heading h2{letter-spacing:-.02em}
+.v5InvLayout{display:grid;grid-template-columns:minmax(245px,286px) minmax(0,1fr);gap:12px;align-items:start}
+.v5Tree{position:sticky;top:10px;max-height:calc(100dvh - 125px);overflow:auto;padding:12px;border:1px solid var(--edge);border-radius:12px;background:var(--panel)}
+.v5Tree input{width:100%;margin:8px 0 10px}.v5TreeHeading{display:flex;align-items:center;justify-content:space-between;gap:8px;font-weight:700;font-size:14px}
+.v5TreeInfo{font-size:11px;color:var(--muted);line-height:1.4;margin:5px 0 9px}.v5Area{border-top:1px solid var(--edge);padding:7px 0}
+.v5Area>summary{cursor:pointer;font-weight:650}.v5SiteList{display:grid;gap:4px;padding:6px 0 3px 9px}
+.v5SiteBtn,.v5BranchBtn{width:100%;padding:7px 8px;text-align:left;border-radius:7px;background:transparent;border:1px solid transparent;overflow-wrap:anywhere}
+.v5SiteBtn:hover,.v5BranchBtn:hover,.v5SiteBtn[aria-current="true"]{background:var(--panel2);border-color:var(--accent)}
+.v5SiteBtn small,.v5BranchBtn small{color:var(--muted)}.v5StationCard{padding:9px;border:1px solid var(--edge);border-radius:9px;margin:9px 0;background:var(--panel2)}
+.v5StationCard h3{margin:0 0 4px;font-size:15px}.v5VGroup{margin:5px 0;border-top:1px solid var(--edge)}.v5VGroup summary{cursor:pointer;padding:7px;font-weight:700}
+.v5CategoryGrid{display:grid;gap:2px;padding:3px 0 5px 8px}.v5ActionBar{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
+.v5TopActions{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:10px 13px;border:1px solid var(--edge);border-radius:10px;background:var(--panel);margin:0 0 10px}
+.v5TopActions .v5Badge{border:1px solid var(--edge);border-radius:30px;padding:4px 9px;font-size:11px;color:var(--muted)}
+.v5HiddenTech{display:none!important}body.v5Tech .v5HiddenTech{display:revert!important}body.v5Tech .v5TechnicalInline{display:inline!important}
+.v5TechDisclosure{margin:10px 0;border-top:1px solid var(--edge);padding-top:7px}.v5TechDisclosure summary{cursor:pointer;color:var(--muted)}
+.v5IdBadge{font-size:10px;color:var(--muted);margin-left:6px;display:none}body.v5Tech .v5IdBadge{display:inline}
+.v5StatusStrip{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.v5StatusStrip .v5Badge{white-space:nowrap}#view-map .mapOverlay{font-size:11px;padding:4px 9px;max-width:42%;opacity:.84}
+#view-map .maphint{display:none}#view-map .v5MapValidation{margin:5px 0}#view-map .v5MapValidation .notice{margin:6px 0 0;max-height:110px;overflow:auto}#view-map .mapLegend{font-size:11px;gap:8px}#view-map .v42VoltageRow .v42Caption{display:none}
+#view-map #v42TopStatus{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#v42LightningPanel td:first-child b{font-size:12px;line-height:1.3;display:inline-block;max-width:240px;overflow-wrap:anywhere}
+#v42LightningPanel td:first-child small{display:block;margin-top:2px}#v42LightningPanel td:nth-child(3){font-size:10px;color:var(--muted)}
+#v42LightningPanel #v42LNote{font-size:11px;line-height:1.35}
+.v5ShortNotice{display:flex;gap:7px;align-items:center;border-radius:8px;padding:6px 9px;border:1px solid var(--edge);background:var(--panel2);font-size:11px}
+.v5ShortNotice summary{cursor:pointer} #v5UploadSummary{margin:8px 0 0}.v5QuickNav{display:flex;gap:8px;flex-wrap:wrap;margin-top:7px}
+#view-static .tbltools label,#view-dynamic .field label{font-size:11px}#view-static .scrolltbl table{min-width:650px}
+.v5PageTitle{font-weight:700;font-size:15px}#view-static .detail h3 .chip{display:none}body.v5Tech #view-static .detail h3 .chip{display:inline-flex}
+#v5TechSetting{display:flex;justify-content:space-between;align-items:center;gap:10px}#v5TechSetting input{min-width:auto}
+#v5SettingsNote{color:var(--muted);font-size:11px;margin-top:4px}
+#v42SldBadge{max-width:290px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}#v42Bay{max-width:300px}
+#view-sld .notice.warn{font-size:11px;padding:6px 10px}
+#mapDetail .kv{min-width:0}#mapDetail h3{font-size:15px}#mapSelection>b{font-size:15px}
+@media(max-width:990px){.v5InvLayout{grid-template-columns:1fr}.v5Tree{position:static;max-height:340px}.v5InvLayout>.panel{min-width:0}#v42LightningPanel{max-width:calc(100vw - 26px)!important}}
+@media(prefers-reduced-motion:reduce){.v5Tree *{scroll-behavior:auto!important}}
