@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $hostExecutable)) { throw "Native host executab
 $manifest = Join-Path $hostRoot 'com.ytbs.powerfactory.solver.json'
 $payload = [ordered]@{
   name = 'com.ytbs.powerfactory.solver'
-  description = 'YTBS local pandapower load flow solver'
+  description = 'Grid Analyzer local pandapower load flow solver'
   path = $hostExecutable
   type = 'stdio'
   allowed_origins = @("chrome-extension://$ExtensionId/")

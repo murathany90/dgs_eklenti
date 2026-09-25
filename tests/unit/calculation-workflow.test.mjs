@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculationKeyId, createCalculationKey } from '../../src/analysis/calculation-key.ts';
+import { calculationKeyId, createCalculationKey, scenarioIsActive } from '../../src/analysis/calculation-key.ts';
 import { createCalculationJob, transitionCalculationJob } from '../../src/analysis/calculation-job.ts';
 import { busAvailability, resultAvailabilityFor } from '../../src/analysis/result-availability.ts';
+import { calculationHistoryText } from '../../src/presentation/calculationPresentation.ts';
 
 const baseKey = input => createCalculationKey({ modelHash: 'model', engine: 'pandapower', mode: 'AC', scenario: { lines: [], switches: [] }, solverVersion: '3.5.5', options: { nr: true }, ...input });
 
@@ -14,6 +15,36 @@ test('calculation keys isolate engine, mode, scenario, solver and options', asyn
   ]);
   for (const key of changed) assert.notEqual(calculationKeyId(key), calculationKeyId(original));
   assert.equal(calculationKeyId(original), calculationKeyId(await baseKey({ options: { nr: true }, scenario: { switches: [], lines: [] } })));
+});
+
+test('virtual energization terminals are part of canonical scenario identity', async () => {
+  const scenario = (restoredTerminals, revision) => ({
+    lines: [['H5846', 1]], switches: [], restoredTerminals, autoRestoreTerminals: false, revision,
+  });
+  const a = await baseKey({ scenario: scenario(['B1', 'B2'], 1) });
+  const b = await baseKey({ scenario: scenario(['B1', 'B2', 'B3'], 2) });
+  const sortedA = await baseKey({ scenario: scenario([' B2 ', 'B1', 'B2'], 999) });
+  const restoredA = await baseKey({ scenario: scenario(['B1', 'B2'], 3) });
+  assert.notEqual(a.scenarioHash, b.scenarioHash);
+  assert.equal(a.scenarioHash, sortedA.scenarioHash);
+  assert.equal(a.scenarioHash, restoredA.scenarioHash, 'revision-only A -> B -> undo -> A must reuse A');
+  assert.equal(scenarioIsActive({ restoredTerminals: ['B1'] }), true);
+  assert.equal(scenarioIsActive({ lines: [], switches: [], restoredTerminals: [], autoRestoreTerminals: true }), false);
+  assert.notEqual(
+    (await baseKey({ scenario: { lines: [], switches: [], autoRestoreTerminals: false } })).scenarioHash,
+    (await baseKey({ scenario: { lines: [], switches: [], autoRestoreTerminals: true } })).scenarioHash,
+  );
+});
+
+test('calculation history uses user-facing labels instead of internal enums', () => {
+  const history = calculationHistoryText({
+    finishedAt: '2026-09-25T10:00:00.000Z', engine: 'browser-approx', engineVersion: 'v5.5', mode: 'AC',
+    convergence: 'NON_CONVERGED', validation: 'COMPLETE_UNVALIDATED', elapsedMs: 1200,
+  });
+  assert.match(history, /Tarayıcı Yaklaşık Çözüm/);
+  assert.match(history, /Yakınsamadı/);
+  assert.match(history, /Bağımsız referansla doğrulanmadı/);
+  for (const internal of ['browser-approx', 'NON_CONVERGED', 'COMPLETE_UNVALIDATED']) assert.equal(history.includes(internal), false);
 });
 
 test('calculation job follows preparation, solve, serialization and completion', () => {

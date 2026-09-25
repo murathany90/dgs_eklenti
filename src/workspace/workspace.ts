@@ -8,17 +8,18 @@ import { toLegacyRows, type ACPreflightDiagnostics, type ResultSet } from '../an
 import { fromLegacyRows } from '../analysis/legacy-adapter.ts';
 import type { ElectricalCanonicalNetwork } from '../model/electrical-types.ts';
 import { displayEquipmentType, presentUserText, primaryDisplayName } from '../presentation/equipmentPresentation.ts';
-import { calculationKeyId, createCalculationKey, scenarioIsActive, sha256, type CalculationKey, type CalculationMetadata } from '../analysis/calculation-key.ts';
+import { calculationKeyId, createCalculationKey, scenarioIsActive, sha256, type CalculationKey, type CalculationMetadata, type ScenarioPayload } from '../analysis/calculation-key.ts';
 import { createCalculationJob, transitionCalculationJob, type CalculationJob, type CalculationJobState } from '../analysis/calculation-job.ts';
 import { availabilityText, busAvailability } from '../analysis/result-availability.ts';
+import { calculationEngineLabel, calculationHistoryText, convergenceStatusLabel } from '../presentation/calculationPresentation.ts';
 
 interface LegacyModel { raw: DgsDocument; rid: string; name: string; stats: Record<string, number> }
 interface LegacyBridge {
   getActive: () => LegacyModel | null;
   getSolver: () => { solved?: number; total?: number; summary?: unknown[] } | null;
   getResultSets: () => Array<{ rows?: Array<{ cls?: string; id?: string; metric?: string; terminal?: string; unit?: string; quality?: string; value?: number; source?: string }> }>;
-  getScenario: () => { lines: unknown[]; switches: unknown[]; autoRestoreTerminals?: boolean; revision?: number };
-  restoreScenario?: (snapshot: { lines: unknown[]; switches: unknown[] }) => void;
+  getScenario: () => { lines: unknown[]; switches: unknown[]; restoredTerminals?: string[]; autoRestoreTerminals?: boolean; revision?: number };
+  restoreScenario?: (snapshot: Partial<ScenarioPayload>) => void;
   runAnalysis: () => Promise<void>;
   loadFiles: (files: File[]) => Promise<void>;
   openView: (name: string) => void;
@@ -180,7 +181,7 @@ solverPanel.innerHTML = `<div class="heading"><div><h2>Elektriksel Analiz</h2><s
   <div class="analysisToolbar"><div class="field"><label for="v61Engine">Hesap motoru</label><select id="v61Engine"><option value="browser">Tarayıcı Yaklaşık Çözüm</option><option value="pandapower">Yerel Tam Şebeke Çözücüsü</option></select></div>
   <div class="field"><label for="v61Mode">Analiz</label><select id="v61Mode"><option value="AC">AC Yük Akışı</option><option value="DC">DC Aktif Güç Akışı</option></select></div>
   <button class="primary" id="v61Run">Hesapla</button><button type="button" id="v61HostHealthButton">Bağlantıyı test et</button><button id="v61ReferenceButton" type="button">PowerFactory referansı yükle</button><input id="v61Reference" type="file" accept=".json,application/json" hidden></div>
-  <p id="v61HostHealth" class="notice warn" role="status">Yerel hesap motoru henüz test edilmedi.</p>
+  <p id="v61HostHealth" class="notice warn" role="status">Grid Analyzer Yerel Hesap Motoru henüz test edilmedi.</p>
   <p id="v61ScenarioSolverNotice" class="notice warn" hidden>Bu hesap motoru bu sürümde sanal senaryoyu uygulamıyor. Senaryoyu sıfırlayın veya Tarayıcı Yaklaşık Çözüm seçin.</p>
   <div id="v61InstallationHelp" class="panel" hidden></div>
   <p id="v61Status" class="notice warn">Önce bir model yükleyin.</p>
@@ -260,13 +261,10 @@ function metricRecords(result: ResultSet | null): MetricRecord[] {
   resultMetricCache.set(result, rows);
   return rows;
 }
-function engineLabel(engine: Engine): string { return engine === 'browser' ? 'Tarayıcı Yaklaşık Çözüm' : 'Yerel Tam Şebeke Çözücüsü'; }
+function engineLabel(engine: Engine): string { return calculationEngineLabel(engine === 'browser' ? 'browser-approx' : 'pandapower'); }
 function convergenceLabel(result: ResultSet | null): string {
   if (!result) return 'Hesap bekleniyor';
-  if (result.convergence === 'CONVERGED') return 'Yakınsadı';
-  if (result.convergence === 'NON_CONVERGED') return 'Yakınsamadı';
-  if (result.convergence === 'PARTIAL') return 'Kısmi çözüm';
-  return 'Hesaplanmadı';
+  return convergenceStatusLabel(result.convergence);
 }
 function validationLabel(result: ResultSet | null): string {
   if (!result) return 'Referans ve çözüm bekleniyor';
@@ -275,10 +273,9 @@ function validationLabel(result: ResultSet | null): string {
   if (result.validation === 'PARTIAL') return 'Eşleme kısmi; bağımsız referans yok';
   return 'Bağımsız referans bekleniyor';
 }
-function scenarioPayload(): { lines: unknown[]; switches: unknown[]; autoRestoreTerminals: boolean } {
+function scenarioPayload(): ScenarioPayload {
   const scenario = legacy.getScenario();
-  const sortEntries = (items: unknown[]) => [...items].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
-  return { lines: sortEntries(scenario.lines), switches: sortEntries(scenario.switches), autoRestoreTerminals: scenario.autoRestoreTerminals ?? false };
+  return { lines: scenario.lines, switches: scenario.switches, restoredTerminals: scenario.restoredTerminals ?? [], autoRestoreTerminals: scenario.autoRestoreTerminals === true };
 }
 function selectedMode(): 'AC' | 'DC' { return analysisState.activeEngine === 'browser' ? 'AC' : analysisState.activeMode; }
 async function makeSelectedKey(): Promise<CalculationKey> {
@@ -511,16 +508,15 @@ function renderHistory(): void {
   list.replaceChildren(...analysisState.calculationHistory.map(record => {
     const item = document.createElement('li');
     const metadata = record.metadata as CalculationMetadata;
-    const date = new Date(metadata.finishedAt).toLocaleString('tr-TR');
-    item.textContent = `${date} · ${metadata.engine} ${metadata.engineVersion} · ${metadata.mode} · ${metadata.convergence} · ${(metadata.elapsedMs / 1000).toLocaleString('tr-TR', { maximumFractionDigits: 1 })} s`;
+    item.textContent = calculationHistoryText(metadata);
     return item;
   }));
 }
 function setHostError(error: NativeHostError): void {
   lastNativeHostError = error;
   const messages: Record<NativeHostError['kind'], string> = {
-    HOST_NOT_REGISTERED: 'Yerel hesap motoru Chrome’a kayıtlı değil.', HOST_ORIGIN_MISMATCH: 'Yerel hesap motoru bu Chrome Extension ID için izinli değil.',
-    HOST_START_FAILED: 'Yerel hesap motoru başlatılamadı.', HOST_DISCONNECTED: 'Yerel hesap motoruyla bağlantı kesildi.',
+    HOST_NOT_REGISTERED: 'Grid Analyzer Yerel Hesap Motoru Chrome’a kayıtlı değil.', HOST_ORIGIN_MISMATCH: 'Grid Analyzer Yerel Hesap Motoru bu Chrome Extension ID için izinli değil.',
+    HOST_START_FAILED: 'Grid Analyzer Yerel Hesap Motoru başlatılamadı.', HOST_DISCONNECTED: 'Grid Analyzer Yerel Hesap Motoru bağlantısı kesildi.',
     HOST_CRASHED: 'Hesap motoru beklenmedik biçimde kapandı.', PROTOCOL_ERROR: 'Hesap motoru protokol sürümü uyumlu değil.', SOLVER_ERROR: 'Yerel çözücü hesap sırasında hata verdi.', TIMEOUT: 'Hesap zaman aşımına uğradı.',
   };
   updateStatus(messages[error.kind], 'bad');
@@ -531,7 +527,7 @@ function setHostError(error: NativeHostError): void {
   const id = (globalThis as typeof globalThis & { chrome?: { runtime?: { id?: string } } }).chrome?.runtime?.id ?? 'EXTENSION_ID';
   const help = solverPanel.querySelector<HTMLElement>('#v61InstallationHelp')!;
   help.hidden = !installationFailure;
-  help.innerHTML = `<b>Bu Chrome Extension ID için Windows yerel motor kurulumu</b><pre id="v61InstallCommand">.\\native-host\\python\\scripts\\install-windows.ps1 -ExtensionId ${safe(id)}</pre><button id="v61CopyInstall" type="button">Komutu kopyala</button><ol><li>PowerShell ile scripti çalıştırın.</li><li>Chrome’u tamamen kapatıp yeniden açın.</li><li>Bağlantıyı test edin.</li></ol>`;
+  help.innerHTML = `<b>Bu Chrome Extension ID için Grid Analyzer Yerel Hesap Motoru kurulumu</b><pre id="v61InstallCommand">.\\native-host\\python\\scripts\\install-windows.ps1 -ExtensionId ${safe(id)}</pre><button id="v61CopyInstall" type="button">Komutu kopyala</button><ol><li>PowerShell ile scripti çalıştırın.</li><li>Chrome’u tamamen kapatıp yeniden açın.</li><li>Bağlantıyı test edin.</li></ol>`;
   help.querySelector<HTMLButtonElement>('#v61CopyInstall')!.onclick = () => navigator.clipboard.writeText(`.\\native-host\\python\\scripts\\install-windows.ps1 -ExtensionId ${id}`);
 }
 function setEngine(engine: Engine): void {
@@ -587,7 +583,7 @@ async function runSelectedSolver(): Promise<void> {
   if (cached) {
     pendingCachedCalculation = cached;
     const meta = cached.metadata as CalculationMetadata;
-    solverPanel.querySelector<HTMLElement>('#v61CacheDescription')!.textContent = `Bu model aynı ayarlarla daha önce hesaplandı. Son hesap: ${new Date(meta.finishedAt).toLocaleString('tr-TR')} · ${engineLabel(engine)} ${meta.engineVersion} · ${meta.convergence}.`;
+    solverPanel.querySelector<HTMLElement>('#v61CacheDescription')!.textContent = `Bu model aynı ayarlarla daha önce hesaplandı. Son hesap: ${new Date(meta.finishedAt).toLocaleString('tr-TR')} · ${engineLabel(engine)} ${meta.engineVersion} · ${convergenceStatusLabel(meta.convergence)}.`;
     prompt.hidden = false;
     return;
   }
@@ -630,7 +626,7 @@ async function executeSelectedCalculation(key: CalculationKey, engine: Engine, m
     const saved = await saveResult(key, result, startedAt, Date.now() - startedClock);
     if (engine === 'pandapower') {
       lastNativeHostError = null;
-      solverPanel.querySelector<HTMLElement>('#v61HostHealth')!.textContent = `Yerel hesap motoru · Bağlı · Protocol 1.0 · pandapower ${result.engineVersion}`;
+      solverPanel.querySelector<HTMLElement>('#v61HostHealth')!.textContent = `Grid Analyzer Yerel Hesap Motoru · Bağlı · Protocol 1.0 · pandapower ${result.engineVersion}`;
       solverPanel.querySelector<HTMLElement>('#v61HostHealth')!.className = 'notice';
       solverPanel.querySelector<HTMLElement>('#v61HostActions')!.hidden = true;
       solverPanel.querySelector<HTMLElement>('#v61InstallationHelp')!.hidden = true;
@@ -673,21 +669,22 @@ solverPanel.querySelector<HTMLButtonElement>('#v61InstallHelp')!.onclick = () =>
 async function checkNativeHealth(): Promise<void> {
   const generation = ++healthGeneration;
   const status = solverPanel.querySelector<HTMLElement>('#v61HostHealth')!;
-  status.textContent = 'Yerel hesap motoru bağlantısı sınanıyor…'; status.className = 'notice warn';
+  status.textContent = 'Grid Analyzer Yerel Hesap Motoru bağlantısı sınanıyor…'; status.className = 'notice warn';
   try {
     const health = await nativeSolver.healthCheck();
     if (generation !== healthGeneration) return;
     const okay = health.status === 'CONNECTED';
-    status.textContent = `Yerel hesap motoru · ${okay ? 'Bağlı' : health.status === 'ENGINE_MISMATCH' ? 'Motor uyuşmuyor' : 'Sürüm uyuşmuyor'} · Protocol ${health.protocolVersion} · ${health.engine} ${health.engineVersion} · Extension ID ${health.extensionId}`;
+    const statusLabels = { CONNECTED: 'Bağlı', PROTOCOL_MISMATCH: 'Protokol sürümü uyumsuz', ENGINE_MISMATCH: 'Hesap motoru uyumsuz', ENGINE_VERSION_MISMATCH: 'Hesap motoru sürümü uyumsuz' } as const;
+    status.textContent = `Grid Analyzer Yerel Hesap Motoru · ${statusLabels[health.status]} · Protocol ${health.protocolVersion} · ${health.engine} ${health.engineVersion} · Extension ID ${health.extensionId}`;
     status.className = `notice ${okay ? '' : 'bad'}`;
     if (okay) { lastNativeHostError = null; solverPanel.querySelector<HTMLElement>('#v61HostActions')!.hidden = true; }
     solverPanel.querySelector<HTMLElement>('#v61InstallationHelp')!.hidden = true;
   } catch (error) {
     if (generation !== healthGeneration) return;
     if (error instanceof NativeHostError) {
-      status.textContent = `Yerel hesap motoru · ${error.kind === 'HOST_NOT_REGISTERED' ? 'Kurulu değil' : error.kind === 'HOST_ORIGIN_MISMATCH' ? 'Kimlik uyuşmuyor' : error.kind === 'TIMEOUT' ? 'Zaman aşımı' : 'Başlatılamadı'} · Bağlantı kurulamadı.`;
+      status.textContent = `Grid Analyzer Yerel Hesap Motoru · ${error.kind === 'HOST_NOT_REGISTERED' ? 'Kurulu değil' : error.kind === 'HOST_ORIGIN_MISMATCH' ? 'Kimlik uyuşmuyor' : error.kind === 'TIMEOUT' ? 'Zaman aşımı' : 'Başlatılamadı'} · Bağlantı kurulamadı.`;
       setHostError(error);
-    } else status.textContent = `Yerel hesap motoru · Başlatılamadı · ${String(error)}`;
+    } else status.textContent = `Grid Analyzer Yerel Hesap Motoru · Başlatılamadı · ${String(error)}`;
     status.className = 'notice bad';
   }
 }
@@ -695,9 +692,9 @@ solverPanel.querySelector<HTMLButtonElement>('#v61HostHealthButton')!.onclick = 
 
 function renderScenario(): void {
   const scenario = legacy.getScenario();
-  const lines = scenario.lines.length, switches = scenario.switches.length;
+  const lines = scenario.lines.length, switches = scenario.switches.length, terminals = scenario.restoredTerminals?.length ?? 0;
   const summary = document.querySelector<HTMLElement>('#scenarioSummary');
-  if (summary) summary.textContent = `${lines + switches} etkin değişiklik · ${lines} hat durumu · ${switches} anahtar durumu. DGS kaynak modeli değiştirilmedi.`;
+  if (summary) summary.textContent = `${lines + switches + terminals} etkin değişiklik · ${lines} hat durumu · ${switches} anahtar durumu · ${terminals} sanal devreye alınan terminal. DGS kaynak modeli değiştirilmedi.`;
   const solverNote = document.querySelector<HTMLElement>('#v4ScenarioStatus');
   const active = scenarioIsActive(scenario);
   const blocked = engineSelect.value === 'pandapower' && active;
@@ -705,7 +702,7 @@ function renderScenario(): void {
   notice.hidden = !blocked;
   if (solverNote) solverNote.dataset.solverNote = blocked ? 'Yerel Tam Şebeke Çözücüsü senaryo değişikliklerini uygulamaz.' : '';
   runButton.disabled = blocked || !['IDLE', 'COMPLETED', 'NON_CONVERGED', 'FAILED', 'CANCELLED'].includes(analysisState.calculationJob.state);
-  if (!blocked && lines + switches) updateStatus('Etkin sanal senaryo · Tarayıcı Yaklaşık Çözüm kullanın veya senaryoyu sıfırlayın.', 'warn');
+  if (!blocked && lines + switches + terminals) updateStatus('Etkin sanal senaryo · Tarayıcı Yaklaşık Çözüm kullanın veya senaryoyu sıfırlayın.', 'warn');
 }
 
 function topologyInWorker(model: CanonicalNetwork): void {
@@ -731,8 +728,8 @@ async function onModelLoaded(model: LegacyModel, file: File, parsed: ParsedModel
   await putRecord('canonical', { id: modelHash, electrical: parsed.electrical, integrity: check.integrity, findings: check.findings, timings: parsed.timings, savedAt: Date.now() });
   analysisState.calculationHistory = await getCalculationHistory(modelHash, 20);
   renderHistory();
-  const savedScenario = await getRecord<{ snapshot: { lines: unknown[]; switches: unknown[]; autoRestoreTerminals?: boolean } }>('scenarios', `${modelHash}:latest`);
-  if (savedScenario?.snapshot) legacy.restoreScenario?.(savedScenario.snapshot);
+  const savedScenario = await getRecord<{ snapshot: Partial<ScenarioPayload> }>('scenarios', `${modelHash}:latest`);
+  legacy.restoreScenario?.(savedScenario?.snapshot ?? { lines: [], switches: [], restoredTerminals: [], autoRestoreTerminals: false });
   topologyInWorker(network);
   void updateActiveResult(); renderMetadata(); renderScope(); renderComparison(); renderScenario();
   updateStatus(`${file.name} modeli hazır · ${nf.format(parsed.electrical.buses.length)} bara · AC/DC hesap bekliyor.`);
@@ -753,7 +750,7 @@ window.V6Bridge = {
     analysisState.activeResult = null; analysisState.activeCalculationKeyId = null; currentCalculationKey = null;
     renderScenario(); renderMetadata(); renderComparison(); renderBusAvailability(); renderScope();
     void updateActiveResult();
-    if (modelHash) void putRecord('scenarios', { id: `${modelHash}:latest`, snapshot: legacy.getScenario(), savedAt: Date.now() });
+    if (modelHash) void putRecord('scenarios', { id: `${modelHash}:latest`, snapshot: scenarioPayload(), savedAt: Date.now() });
   },
   scenarioCalculated: () => {
     if (!network || !scenarioIsActive(legacy.getScenario())) return;
@@ -777,12 +774,14 @@ window.V6Bridge = {
 for (const id of ['v54GoAnalysis', 'runSolver']) document.querySelector(`#${id}`)?.addEventListener('click', () => navigate('analysis'));
 document.querySelector('#v54GoScenario')?.addEventListener('click', () => navigate('scenario'));
 
-document.title = 'YTBS Şebeke Analiz ve Görüntüleme v6.1.2';
+document.title = 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.3';
 const appTitle = document.querySelector<HTMLElement>('.apphead h1');
-if (appTitle) appTitle.textContent = 'YTBS Şebeke Analiz ve Görüntüleme v6.1.2';
+if (appTitle) appTitle.textContent = 'Grid Analyzer';
+const brandLogo = document.querySelector<HTMLElement>('.brandlogo');
+if (brandLogo) brandLogo.textContent = 'GA';
 const appVersion = document.querySelector<HTMLElement>('.brand small');
-if (appVersion) appVersion.textContent = 'Yerel model ve şebeke inceleme';
-if (footer) footer.textContent = 'YTBS · Chrome MV3 · v6.1.2';
+if (appVersion) appVersion.textContent = 'Şebeke Analiz Sistemi';
+if (footer) footer.textContent = 'Grid Analyzer · Chrome MV3 · v6.1.3';
 renderMetadata(); renderScope(); renderScenario(); presentationSweep();
 
 void getRecord<{ file: File; name: string }>('models', 'pending').then(async record => {
