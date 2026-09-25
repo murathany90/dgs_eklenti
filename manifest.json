@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YTBS Şebeke Analiz ve Görüntüleme",
-  "version": "6.1.1",
+  "version": "6.1.2",
   "description": "YTBS şebeke modelini yerel olarak görüntüler ve çözümler.",
   "action": { "default_title": "YTBS çalışma alanı" },
   "background": { "service_worker": "background.js" },

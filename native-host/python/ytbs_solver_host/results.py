@@ -13,6 +13,15 @@ def clean(value):
         return None
 
 
+def result_availability(mode, convergence):
+    if mode == "AC" and convergence == "NON_CONVERGED":
+        reason = "AC_NON_CONVERGED"
+        return {"mode": mode, "convergence": convergence, "reasons": {"voltage": reason, "angle": reason, "activePower": reason, "reactivePower": reason}}
+    if mode == "DC":
+        return {"mode": mode, "convergence": convergence, "reasons": {"voltage": "DC_MODE_NO_VOLTAGE_MAGNITUDE", "reactivePower": "DC_MODE_NO_REACTIVE_POWER"}}
+    return {"mode": mode, "convergence": convergence, "reasons": {}}
+
+
 def extract(net, ids, model, mode, unsupported, elapsed_ms):
     quality = "CALCULATED"
     source = "pandapower"

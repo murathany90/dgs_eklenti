@@ -7,8 +7,9 @@ const VERSION = '1.0';
 const CHUNK = 128 * 1024;
 interface Message { type: string; protocolVersion: string; requestId: string; jobId: string; [key: string]: unknown }
 interface Port { postMessage: (message: Message) => void; disconnect: () => void; onMessage: { addListener: (listener: (message: Message) => void) => void }; onDisconnect: { addListener: (listener: () => void) => void } }
-declare const chrome: { runtime: { connectNative: (name: string) => Port; lastError?: { message: string } } };
-export type NativeHostErrorKind = 'HOST_NOT_INSTALLED' | 'HOST_DISCONNECTED' | 'HOST_CRASHED' | 'PROTOCOL_ERROR' | 'TIMEOUT';
+declare const chrome: { runtime: { id?: string; connectNative: (name: string) => Port; lastError?: { message: string } } };
+export type NativeHostErrorKind = 'HOST_NOT_REGISTERED' | 'HOST_ORIGIN_MISMATCH' | 'HOST_START_FAILED' | 'HOST_DISCONNECTED' | 'HOST_CRASHED' | 'PROTOCOL_ERROR' | 'SOLVER_ERROR' | 'TIMEOUT';
+export interface NativeHostHealth { status: 'CONNECTED' | 'PROTOCOL_MISMATCH' | 'ENGINE_MISMATCH'; protocolVersion: string; engine: string; engineVersion: string; extensionId: string }
 
 function base64(bytes: Uint8Array): string {
   let binary = '';
@@ -22,26 +23,61 @@ export class NativeHostError extends Error {
   constructor(readonly kind: NativeHostErrorKind, readonly technicalMessage: string) { super(technicalMessage); this.name = 'NativeHostError'; }
 }
 export function classifyDisconnect(message: string, connected: boolean): NativeHostErrorKind {
-  if (/host (was )?not found|specified native messaging host.*not found|native host.*not installed/i.test(message)) return 'HOST_NOT_INSTALLED';
-  if (/exited|crashed|terminated unexpectedly/i.test(message)) return 'HOST_CRASHED';
-  return connected ? 'HOST_DISCONNECTED' : 'HOST_NOT_INSTALLED';
+  if (/host (was )?not found|specified native messaging host.*not found|native host.*not registered/i.test(message)) return 'HOST_NOT_REGISTERED';
+  if (/forbidden|not allowed|origin mismatch|allowed_origins|access.*denied|permission/i.test(message)) return 'HOST_ORIGIN_MISMATCH';
+  if (/failed to start|could not be started|launch failed|invalid .*manifest|cannot create.*host/i.test(message)) return 'HOST_START_FAILED';
+  if (/exited|crashed|terminated unexpectedly/i.test(message)) return connected ? 'HOST_CRASHED' : 'HOST_START_FAILED';
+  return connected ? 'HOST_DISCONNECTED' : 'HOST_START_FAILED';
 }
 export function classifyHostResponse(code: string): NativeHostErrorKind {
-  return /PROTOCOL|VERSION|UNKNOWN_COMMAND/.test(code) ? 'PROTOCOL_ERROR' : 'HOST_CRASHED';
+  if (/PROTOCOL|VERSION|UNKNOWN_COMMAND/.test(code)) return 'PROTOCOL_ERROR';
+  if (code === 'HOST_ERROR') return 'SOLVER_ERROR';
+  return 'PROTOCOL_ERROR';
 }
+export function classifyConnectionError(message: string): NativeHostErrorKind { return classifyDisconnect(message, false); }
 
 export class PandapowerSolver implements PowerSystemSolver {
   readonly id = 'pandapower';
   readonly capabilities = { ac: true, dc: true, fullNetwork: true, scenarios: false };
+  async healthCheck(timeoutMs = 3000): Promise<NativeHostHealth> {
+    let port: Port;
+    try { port = chrome.runtime.connectNative(HOST); }
+    catch (error) { const message = error instanceof Error ? error.message : String(error); throw new NativeHostError(classifyConnectionError(message), message); }
+    const requestId = crypto.randomUUID(), jobId = crypto.randomUUID();
+    try {
+      const capabilities = await new Promise<Message>((resolve, reject) => {
+        let settled = false;
+        const finish = (callback: () => void): void => { if (settled) return; settled = true; clearTimeout(timer); callback(); };
+        const timer = setTimeout(() => finish(() => reject(new NativeHostError('TIMEOUT', 'Native host health check timed out'))), timeoutMs);
+        port.onMessage.addListener(message => {
+          if (message.requestId !== requestId || message.jobId !== jobId) return;
+          if (message.protocolVersion !== VERSION) return finish(() => reject(new NativeHostError('PROTOCOL_ERROR', `Native host protocol version mismatch: ${String(message.protocolVersion)}`)));
+          if (message.type === 'ERROR') return finish(() => reject(new NativeHostError(classifyHostResponse(String(message.code ?? '')), `${String(message.code ?? '')}: ${String(message.message ?? '')}`)));
+          if (message.type === 'CAPABILITIES') finish(() => resolve(message));
+        });
+        port.onDisconnect.addListener(() => {
+          const message = chrome.runtime.lastError?.message ?? 'Native host connection closed before health response';
+          finish(() => reject(new NativeHostError(classifyDisconnect(message, false), message)));
+        });
+        try { port.postMessage({ type: 'HELLO', protocolVersion: VERSION, requestId, jobId }); }
+        catch (error) { const message = error instanceof Error ? error.message : String(error); finish(() => reject(new NativeHostError(classifyConnectionError(message), message))); }
+      });
+      const engine = String(capabilities.engine ?? '');
+      const engineVersion = String(capabilities.engineVersion ?? '');
+      const status = engine !== 'pandapower' ? 'ENGINE_MISMATCH' : engineVersion !== '3.5.5' ? 'PROTOCOL_MISMATCH' : 'CONNECTED';
+      return { status, protocolVersion: String(capabilities.protocolVersion), engine, engineVersion, extensionId: chrome.runtime.id ?? 'bilinmiyor' };
+    } finally { port.disconnect(); }
+  }
   async runLoadFlow(
     network: CanonicalNetwork, options: LoadFlowOptions,
     onProgress?: (phase: string) => void,
     onDiagnostics?: (diagnostics: ACPreflightDiagnostics) => void,
   ): Promise<ResultSet> {
     if (!network.electrical) throw Error('Elektriksel temel model bulunmuyor');
+    onProgress?.('PREPARING');
     let port: Port;
     try { port = chrome.runtime.connectNative(HOST); }
-    catch (error) { throw new NativeHostError('HOST_NOT_INSTALLED', String(error)); }
+    catch (error) { const message = error instanceof Error ? error.message : String(error); throw new NativeHostError(classifyConnectionError(message), message); }
     const requestId = crypto.randomUUID(), jobId = crypto.randomUUID();
     const pending: Message[] = [];
     let wake: ((message: Message) => void) | null = null;
@@ -86,6 +122,7 @@ export class PandapowerSolver implements PowerSystemSolver {
     try {
       send('HELLO');
       await expect('CAPABILITIES');
+      onProgress?.('TRANSFERRING');
       const payload = new TextEncoder().encode(JSON.stringify(network.electrical));
       const sha256 = hex(await crypto.subtle.digest('SHA-256', payload));
       send('CREATE_MODEL', { byteLength: payload.byteLength, sha256 });
@@ -98,6 +135,7 @@ export class PandapowerSolver implements PowerSystemSolver {
       await expect('PROGRESS');
       send('PREFLIGHT');
       const diagnosticMessage = await expect('DIAGNOSTICS');
+      onProgress?.('PREFLIGHT');
       if (!diagnosticMessage.diagnostics || typeof diagnosticMessage.diagnostics !== 'object') throw new NativeHostError('PROTOCOL_ERROR', 'Preflight diagnostic payload missing');
       onDiagnostics?.(diagnosticMessage.diagnostics as ACPreflightDiagnostics);
       send('RUN_LOAD_FLOW', { mode: options.mode });

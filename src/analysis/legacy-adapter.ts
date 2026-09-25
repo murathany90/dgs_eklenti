@@ -1,5 +1,6 @@
 import type { CanonicalNetwork } from '../model/types.ts';
 import type { BranchEndResult, BranchResult, BusResult, GeneratorResult, ResultSet, TransformerResult } from './result-set.ts';
+import { resultAvailabilityFor } from './result-availability.ts';
 
 export interface LegacyRow { cls?: string; id?: string; metric?: string; terminal?: string; value?: number; quality?: string; source?: string }
 const emptyEnd = (): BranchEndResult => ({ pMw: null, qMvar: null, sMva: null, iA: null });
@@ -15,10 +16,13 @@ export function fromLegacyRows(network: CanonicalNetwork, rows: LegacyRow[], con
     hv: { ...emptyEnd(), pMw: value('ElmTr2', id, 'P', 'hv'), qMvar: value('ElmTr2', id, 'Q', 'hv') }, lv: emptyEnd(),
     loadingPercent: null, pLossMw: null, qLossMvar: null, tapPosition: null, quality: 'APPROXIMATE', source: 'browser-approx-v5.5' }));
   const generators: GeneratorResult[] = ['ElmSym', 'ElmGenStat'].flatMap(cls => ids(cls).map(id => ({ id, bus: null, pMw: value(cls, id, 'P'), qMvar: value(cls, id, 'Q'), vPu: null, limitState: 'UNKNOWN' as const, quality: 'APPROXIMATE' as const, source: 'browser-approx-v5.5' })));
-  return { schemaVersion: '2.0', engine: 'browser-approx-v5.5', engineVersion: '5.5', modelId: network.modelId, modelHash: network.modelHash,
+  const result: ResultSet = { schemaVersion: '2.0', engine: 'browser-approx-v5.5', engineVersion: '5.5', modelId: network.modelId, modelHash: network.modelHash,
     timestamp: new Date().toISOString(), topologyMode: 'BUS_BRANCH', electricalScope: 'TRANSMISSION_REDUCED', convergence,
     iterations: null, maxMismatch: null, validation: 'REDUCED', warnings: ['66 kV+ yaklaşık sonuç; tam ağ değildir.'], unsupported: [],
     buses, branches, transformers, generators, externalGrids: [], losses: [],
     summary: { generationMw: null, generationMvar: null, loadMw: null, loadMvar: null, activeLossMw: null, reactiveLossMvar: null,
-      busCount: buses.length, lineCount: branches.length, transformerCount: transformers.length, solveMs: null, mode: 'AC' } };
+      busCount: buses.length, lineCount: branches.length, transformerCount: transformers.length, solveMs: null, mode: 'AC' },
+    resultAvailability: { mode: 'AC', convergence, reasons: {} } };
+  result.resultAvailability = resultAvailabilityFor(result);
+  return result;
 }

@@ -75,6 +75,7 @@ def serve(reader=None, writer=None):
                 if mode not in ("AC", "DC"):
                     raise ValueError("invalid load flow mode")
                 send("PROGRESS", phase="CONVERTING")
+                send("PROGRESS", phase=f"SOLVING_{mode}")
                 result = run(job["model"], mode, job.get("prepared"), job.get("diagnostics"))
                 send("PROGRESS", phase="SERIALIZING")
                 started = time.perf_counter()

@@ -16,6 +16,7 @@ export class BrowserApproxSolver implements PowerSystemSolver {
       iterations: null, maxMismatch: null, validation: 'REDUCED', warnings: ['Deneysel 66 kV+ yaklaşık AC-PQ çözümü; PowerFactory sonucu değildir.'], unsupported: [],
       buses: [], branches: [], generators: [], transformers: [], externalGrids: [], losses: [],
       summary: { generationMw: null, generationMvar: null, loadMw: null, loadMvar: null, activeLossMw: null, reactiveLossMvar: null, busCount: 0, lineCount: 0, transformerCount: 0, solveMs: null, mode: _options.mode },
+      resultAvailability: { mode: _options.mode, convergence: !result ? 'NON_CONVERGED' : result.solved === result.total ? 'CONVERGED' : 'PARTIAL', reasons: {} },
     };
   }
 }
