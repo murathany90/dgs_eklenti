@@ -1,5 +1,7 @@
 import type { ElectricalScope } from '../model/types.ts';
 import type { Integrity } from '../validation/validation.ts';
+import type { CalculationMetadata } from './calculation-key.ts';
+import type { ResultAvailability } from './result-availability.ts';
 
 export type Quality = 'MEASURED' | 'CALCULATED' | 'ESTIMATED' | 'FORECAST' | 'APPROXIMATE' | 'REFERENCE';
 export interface ResultValue { id: string; value: number; quality: Quality; source: string; metric?: string; terminal?: string; unit?: string }
@@ -21,13 +23,17 @@ export interface ACPreflightDiagnostics {
   modelCounts: { bus: number; line: number; transformer: number; generator: number };
   mappedCounts: { bus: number; line: number; transformer: number; generator: number };
   elementsNotMapped: number; notMappedByKind: Array<{ kind: string; model: number; mapped: number; notMapped: number }>;
-  electricalIslandCount: number; islandsWithSlackCount: number; islandsWithoutSlackCount: number; unsuppliedBusCount: number;
+  electricalIslandCount: number; islandsWithSlackCount: number; islandsWithoutSlackCount: number; unsuppliedBusCount: number; unsuppliedBusIds?: string[];
   inServiceBusCount: number; externalGridCount: number; generationMw: number; loadMw: number; initialPImbalanceMw: number;
   pvBusCount: number; pqBusCount: number; pvUnitCount: number; pvUnitsMissingQLimits: number; pvUnitsWithQLimits: number;
   pvUnitsInvalidVoltageSetpoint: number; minVmSetpointPu: number | null; maxVmSetpointPu: number | null;
   transformerTapOutsideDeclaredLimits: number; transformerTapDeviationAbsGreaterThan10: number;
   transformerPhaseAngleMissing: number; transformerWindingConnectionMissing: number;
   unsupportedOrUnsolvedControlCount: number; openSwitchCount: number; closedSwitchCount: number;
+  stationControlCount?: number; stationControlsInService?: number; remoteVoltageControllerCount?: number;
+  reactiveSharingRecordCount?: number; droopRecordCount?: number;
+  transformerPhaseAngleCoverage?: { total: number; available: number };
+  transformerWindingConnectionCoverage?: { total: number; available: number };
   zeroImpedanceCount: number; nonFiniteValueCount: number; negativeReactanceCount: number; verySmallReactanceCount: number;
   candidateNonPositiveCompensatedPathCount: number; candidatePathRule: string; unsupportedConversionCount: number;
 }
@@ -41,6 +47,8 @@ export interface ResultSet {
   externalGrids: ExternalGridResult[]; losses: Array<{ id: string; pMw: number | null; qMvar: number | null }>;
   summary: NetworkSummary; preflight?: ACPreflightDiagnostics;
   performance?: { conversionMs: number; solveMs: number; serializationMs?: number };
+  resultAvailability: ResultAvailability;
+  calculation?: CalculationMetadata;
 }
 
 export function toLegacyRows(set: ResultSet): Array<{ cls: string; id: string; metric: string; value: number; unit: string; terminal: string; quality: Quality; source: string; timestamp: string; orientation?: string }> {

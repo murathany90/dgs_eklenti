@@ -221,6 +221,7 @@ def preflight(model, net=None, ids=None, unsupported=None):
                    if item.get("id") in ids["ext_grid"] and item.get("inService") is True and item.get("bus") in bus_ids}
     unseen = set(bus_ids)
     islands, islands_with_slack, unsupplied_buses = 0, 0, 0
+    unsupplied_bus_ids = []
     while unseen:
         islands += 1
         stack = [unseen.pop()]
@@ -234,6 +235,7 @@ def preflight(model, net=None, ids=None, unsupported=None):
             islands_with_slack += 1
         else:
             unsupplied_buses += len(component)
+            unsupplied_bus_ids.extend(sorted(component))
 
     in_service_gens = [item for item in model.get("generators", []) if item.get("id") in ids["gen"] or item.get("id") in ids["sgen"]]
     in_service_gens = [item for item in in_service_gens if item.get("inService") is True]
@@ -263,6 +265,11 @@ def preflight(model, net=None, ids=None, unsupported=None):
     switch_closed = sum(item.get("inService") is True and item.get("closed") is True for item in switch_items)
     switch_open = sum(item.get("inService") is True and item.get("closed") is not True for item in switch_items)
     controls = model.get("controls", [])
+    station_controls = [item for item in controls if item.get("kind") == "STATION"]
+    station_controls_in_service = [item for item in station_controls if item.get("inService") is True]
+    remote_voltage_controls = [item for item in controls if item.get("controlledBus")]
+    reactive_sharing_records = [item for item in station_controls if item.get("reactiveSharingModeCode") is not None or len(item.get("controlledGeneratorIds") or []) > 1]
+    droop_records = [item for item in station_controls if item.get("droopEnabled") is True or item.get("droopPercent") is not None or item.get("droopRatedMvar") is not None]
     unsupported_controls = sum(item.get("support") != "SUPPORTED" or item.get("mappingStatus") == "MAPPED_BUT_NOT_SOLVED" for item in controls)
 
     not_mapped = [
@@ -317,6 +324,7 @@ def preflight(model, net=None, ids=None, unsupported=None):
         "elementsNotMapped": model_elements_not_mapped, "notMappedByKind": not_mapped,
         "electricalIslandCount": islands, "islandsWithSlackCount": islands_with_slack,
         "islandsWithoutSlackCount": islands - islands_with_slack, "unsuppliedBusCount": unsupplied_buses,
+        "unsuppliedBusIds": unsupplied_bus_ids,
         "inServiceBusCount": len(bus_ids), "externalGridCount": ext_count,
         "generationMw": total_gen_mw, "loadMw": total_load_mw,
         "initialPImbalanceMw": total_gen_mw - total_load_mw,
@@ -326,8 +334,13 @@ def preflight(model, net=None, ids=None, unsupported=None):
         "minVmSetpointPu": min(valid_vm) if valid_vm else None, "maxVmSetpointPu": max(valid_vm) if valid_vm else None,
         "transformerTapOutsideDeclaredLimits": taps_outside, "transformerTapDeviationAbsGreaterThan10": taps_extreme,
         "transformerPhaseAngleMissing": sum(item.get("phaseShiftDeg") is None for item in trafos),
+        "transformerPhaseAngleCoverage": {"total": len(trafos), "available": sum(item.get("phaseShiftDeg") is not None for item in trafos)},
         "transformerWindingConnectionMissing": winding_missing,
+        "transformerWindingConnectionCoverage": {"total": len(trafos), "available": sum(bool(item.get("hvWindingConnection") and item.get("lvWindingConnection")) for item in trafos)},
         "unsupportedOrUnsolvedControlCount": unsupported_controls,
+        "stationControlCount": len(station_controls), "stationControlsInService": len(station_controls_in_service),
+        "remoteVoltageControllerCount": len(remote_voltage_controls), "reactiveSharingRecordCount": len(reactive_sharing_records),
+        "droopRecordCount": len(droop_records),
         "openSwitchCount": switch_open, "closedSwitchCount": switch_closed,
         "zeroImpedanceCount": int(impedance_zero), "nonFiniteValueCount": int(non_finite_count),
         "negativeReactanceCount": int(negative_x), "verySmallReactanceCount": int(very_small_x),

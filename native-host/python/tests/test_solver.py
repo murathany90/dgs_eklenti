@@ -10,7 +10,7 @@ from pandapower.auxiliary import LoadflowNotConverged
 
 from ytbs_solver_host.main import serve
 from ytbs_solver_host.network_mapper import convert, preflight, prepare
-from ytbs_solver_host.pandapower_adapter import run
+from ytbs_solver_host.pandapower_adapter import diagnose_ac, run
 from ytbs_solver_host.protocol import read_message, write_message
 
 
@@ -39,6 +39,8 @@ class ElectricalTests(unittest.TestCase):
         self.assertIsNone(result["buses"][1]["vPu"])
         self.assertIsNone(result["branches"][0]["from"]["qMvar"])
         self.assertIsNone(result["summary"]["activeLossMw"])
+        self.assertEqual(result["resultAvailability"]["reasons"]["voltage"], "DC_MODE_NO_VOLTAGE_MAGNITUDE")
+        self.assertEqual(result["resultAvailability"]["reasons"]["reactivePower"], "DC_MODE_NO_REACTIVE_POWER")
         expected_deg = -(100.0 * 10.0 / 110.0**2) * 180 / math.pi
         self.assertAlmostEqual(result["buses"][1]["angleDeg"], expected_deg, delta=0.3)
 
@@ -125,6 +127,9 @@ class ElectricalTests(unittest.TestCase):
         self.assertEqual(diagnostic["islandsWithSlackCount"], 1)
         self.assertEqual(diagnostic["islandsWithoutSlackCount"], 1)
         self.assertEqual(diagnostic["unsuppliedBusCount"], 1)
+        self.assertEqual(diagnostic["unsuppliedBusIds"], ["B2"])
+        self.assertEqual(diagnostic["stationControlCount"], 0)
+        self.assertEqual(diagnostic["transformerPhaseAngleCoverage"]["total"], 1)
         self.assertEqual(diagnostic["pvUnitsMissingQLimits"], 1)
         self.assertEqual(diagnostic["transformerTapOutsideDeclaredLimits"], 0)
         self.assertEqual(diagnostic["transformerTapDeviationAbsGreaterThan10"], 1)
@@ -150,6 +155,23 @@ class ElectricalTests(unittest.TestCase):
         self.assertEqual(result["convergence"], "NON_CONVERGED")
         self.assertEqual(result["buses"], [])
         self.assertEqual(result["validation"], "NON_CONVERGED")
+        self.assertEqual(result["resultAvailability"]["reasons"]["voltage"], "AC_NON_CONVERGED")
+
+    def test_ac_root_cause_profiles_are_isolated_and_diagnostic_only(self):
+        model = base(); line(model); load(model, 1)
+        prepared, diagnostic = prepare(model)
+        calls = []
+        def profile(net, **options):
+            calls.append(options)
+            if options["algorithm"] == "nr" and options["enforce_q_lims"]:
+                raise LoadflowNotConverged("standard profile")
+        with patch("ytbs_solver_host.pandapower_adapter.pp.runpp", side_effect=profile):
+            result = diagnose_ac(model, prepared, diagnostic)
+        self.assertEqual([item["algorithm"] for item in calls], ["nr", "nr", "iwamoto_nr"])
+        self.assertEqual(calls[0]["enforce_q_lims"], True)
+        self.assertEqual(calls[1]["enforce_q_lims"], False)
+        self.assertTrue(all(item["userResult"] is False for item in result["profiles"]))
+        self.assertTrue(any("Q-limit enforcement" in hint for hint in result["engineeringHints"]))
 
 
 class ProtocolTests(unittest.TestCase):
@@ -191,6 +213,7 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(any(msg["type"] == "ERROR" for msg in messages))
         diagnostic = next(msg["diagnostics"] for msg in messages if msg["type"] == "DIAGNOSTICS")
         self.assertEqual(diagnostic["modelCounts"]["bus"], 2)
+        self.assertTrue(any(msg.get("phase") == "SOLVING_AC" for msg in messages if msg["type"] == "PROGRESS"))
         summary = next(msg for msg in messages if msg["type"] == "RESULT_SUMMARY")
         chunks = [msg for msg in messages if msg["type"] == "RESULT_CHUNK"]
         self.assertEqual(len(chunks), summary["chunkCount"])

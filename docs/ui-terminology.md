@@ -1,4 +1,4 @@
-# v6.1.1 UI terminology
+# v6.1.2 UI terminology
 
 | Internal source name | Default display |
 | --- | --- |

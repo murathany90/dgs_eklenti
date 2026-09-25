@@ -1,4 +1,4 @@
-# v6.1.1 UI architecture
+# v6.1.2 UI architecture
 
 The workspace keeps the existing DGS parser, map, station and line selection, single-line diagram, capacity, flow animation and scenario code. A small presentation shell routes those features through five main pages: Model, Map, Single-Line Diagram, Analysis and Scenario. Help and Settings are helper actions in the header. Model pages contain Summary, Equipment, Operating Data and Data Quality.
 

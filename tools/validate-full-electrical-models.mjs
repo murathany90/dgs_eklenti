@@ -15,7 +15,7 @@ const reports = [];
 const pythonProgram = String.raw`
 import collections, json, sys, time
 from ytbs_solver_host.network_mapper import convert, prepare
-from ytbs_solver_host.pandapower_adapter import run
+from ytbs_solver_host.pandapower_adapter import run, diagnose_ac
 path = sys.argv[1]
 with open(path, encoding='utf-8') as stream: model = json.load(stream)
 t0 = time.perf_counter(); prepared, diagnostic = prepare(model); preflight_ms = (time.perf_counter()-t0)*1000
@@ -29,6 +29,7 @@ for mode in ("AC", "DC"):
         "transformers": len(result["transformers"]), "generators": len(result["generators"])},
         "unsupportedCount": len(result["unsupported"]), "unsupportedByKind": dict(collections.Counter(item["kind"] for item in result["unsupported"])),
         "warnings": result["warnings"][:3]})
+output["acRootCauseDiagnostics"] = diagnose_ac(model, prepared, diagnostic)
 print(json.dumps(output, allow_nan=False, separators=(",", ":")))
 `;
 
@@ -48,7 +49,8 @@ try {
     await writeFile(networkPath, JSON.stringify(electrical));
     const child = spawnSync(python, ['-c', pythonProgram, networkPath], { encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 });
     if (child.error || child.status !== 0) throw child.error ?? Error(`Python solver exited ${child.status}: ${child.stderr}`);
-    const native = JSON.parse(child.stdout.trim());
+    const stdoutLines = child.stdout.trim().split(/\r?\n/).filter(Boolean);
+    const native = JSON.parse(stdoutLines.at(-1));
     const stationControls = electrical.controls.filter(control => control.kind === 'STATION');
     const pv = electrical.generators.filter(generator => generator.inService && generator.controlMode === 'PV');
     const staticGenerators = electrical.generators.filter(generator => generator.sourceRefs.powerFactoryClass === 'ElmGenStat');
@@ -68,12 +70,23 @@ try {
       transformerPhaseCoverage: { total: electrical.transformers.length, phaseAngle: electrical.transformers.filter(item => item.phaseShiftDeg !== null).length,
         windingConnections: electrical.transformers.filter(item => item.hvWindingConnection && item.lvWindingConnection).length,
         vectorGroup: electrical.transformers.filter(item => item.vectorGroup !== null).length },
+      acCoverage: { pvGeneratorCount: pv.length, pvWithCompleteQLimits: pv.filter(item => item.qMinMvar !== null && item.qMaxMvar !== null).length,
+        pvWithoutQLimits: pv.filter(item => item.qMinMvar === null || item.qMaxMvar === null).length,
+        stationControllers: stationControls.length, stationControllersInService: stationControls.filter(item => item.inService).length,
+        remoteVoltageControllers: electrical.controls.filter(item => item.controlledBus).length,
+        reactiveSharingRecords: stationControls.filter(item => item.reactiveSharingModeCode !== null && item.reactiveSharingModeCode !== undefined).length,
+        droopRecords: stationControls.filter(item => item.droopEnabled || item.droopPercent !== null || item.droopRatedMvar !== null).length,
+        transformerPhaseAngles: electrical.transformers.filter(item => item.phaseShiftDeg !== null).length,
+        transformerWindingConnections: electrical.transformers.filter(item => item.hvWindingConnection && item.lvWindingConnection).length,
+        negativeX: native.diagnostics.negativeReactanceCount,
+        seriesCompensationCandidatePaths: native.diagnostics.candidateNonPositiveCompensatedPathCount,
+        initialActivePowerImbalanceMw: native.diagnostics.initialPImbalanceMw },
       engineCapabilities: electrical.engineCapabilities, modelCoverage: electrical.modelCoverage,
-      preflightMs: native.preflightMs, preflight: native.diagnostics, solves: native.solves,
+      preflightMs: native.preflightMs, preflight: native.diagnostics, solves: native.solves, acRootCauseDiagnostics: native.acRootCauseDiagnostics,
     };
     reports.push(report);
     console.log(`${basename(input)}: ${JSON.stringify({ status: report.status, electricalCounts: report.electricalCounts, qLimitCoverage: report.qLimitCoverage,
-      stationControls: report.stationControls, transformerPhaseCoverage: report.transformerPhaseCoverage, preflightMs: report.preflightMs,
+      stationControls: report.stationControls, transformerPhaseCoverage: report.transformerPhaseCoverage, acCoverage: report.acCoverage, preflightMs: report.preflightMs,
       preflight: report.preflight, solves: report.solves })}`);
   }
   await mkdir('artifacts', { recursive: true });

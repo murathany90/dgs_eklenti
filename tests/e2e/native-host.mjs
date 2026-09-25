@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 if (process.platform !== 'win32') { console.log('Native Chrome host E2E SKIP: Windows required'); process.exit(0); }
 const model = resolve(process.env.DGS_E2E_MODEL ?? 'kontrol1/20260923_1200_SN3_TR0.json');
 const extension = resolve('dist');
-const profile = await mkdtemp(join(tmpdir(), 'ytbs-v611-native-'));
+const profile = await mkdtemp(join(tmpdir(), 'ytbs-v612-native-'));
 const args = [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--no-first-run'];
 const launch = () => chromium.launchPersistentContext(profile, { viewport: { width: 1440, height: 900 }, channel: 'chromium', headless: true, args });
 const hostRoot = resolve('native-host/python');
@@ -37,13 +37,17 @@ try {
   await page.waitForFunction(() => document.querySelector('#v61Scope')?.textContent?.includes('86.479'), null, { timeout: 180000 });
   await page.locator('#primaryTabs [data-primary="analysis"]').click();
   await page.locator('#v61Engine').selectOption('pandapower');
+  await page.locator('#v61HostHealthButton').click();
+  await page.locator('#v61HostHealth').getByText('Bağlı').waitFor({ timeout: 15000 });
+  const health = await page.locator('#v61HostHealth').innerText();
+  if (!health.includes('Protocol 1.0') || !health.includes('pandapower 3.5.5')) throw Error(`Native health metadata missing: ${health}`);
   await page.locator('#v61Run').click();
   await page.waitForFunction(() => {
     const status = document.querySelector('#v61Status')?.textContent ?? '';
-    return /AC yük akışı yakınsamadı|Yerel hesap motoruyla bağlantı kesildi|beklenmedik biçimde kapandı|sürümü uyumlu değil|zaman aşımına uğradı/.test(status);
+    return /AC çözümü 30 Newton iterasyonunda yakınsamadı|Chrome’a kayıtlı değil|izinli değil|beklenmedik biçimde kapandı|uyumlu değil|zaman aşımına uğradı/.test(status);
   }, null, { timeout: 600000 });
   const acStatus = await page.locator('#v61Status').innerText();
-  if (!acStatus.includes('AC yük akışı yakınsamadı')) throw Error(`Native host AC did not return a solve result: ${acStatus}`);
+  if (!acStatus.includes('AC çözümü 30 Newton iterasyonunda yakınsamadı')) throw Error(`Native host AC did not return the default AC result: ${acStatus}`);
   const acSummary = await page.locator('#v61NonConvergence').innerText();
   if (!acSummary.includes('86.479') || !acSummary.includes('2.382') || !acSummary.includes('30')) throw Error(`Non-convergence model counts missing: ${acSummary}`);
   if ((await page.locator('#v61Comparison').innerText()).trim()) throw Error('Non-converged AC must not show numeric comparison rows');
@@ -53,7 +57,7 @@ try {
   await page.locator('#v61Run').click();
   await page.waitForFunction(() => {
     const status = document.querySelector('#v61Status')?.textContent ?? '';
-    return /DC yük akışı yakınsadı|Yerel hesap motoruyla bağlantı kesildi|beklenmedik biçimde kapandı|sürümü uyumlu değil|zaman aşımına uğradı/.test(status);
+    return /DC yük akışı yakınsadı|Chrome’a kayıtlı değil|izinli değil|beklenmedik biçimde kapandı|uyumlu değil|zaman aşımına uğradı/.test(status);
   }, null, { timeout: 600000 });
   const dcStatus = await page.locator('#v61Status').innerText();
   console.log(`Native full DGS DC status received: ${dcStatus}; waiting for the result table`);
@@ -65,9 +69,12 @@ try {
     });
   if (!(await page.locator('#v61Comparison').innerText()).includes('Aktif güç')) throw Error('Typed DC result table is missing active-power metrics');
   if (!(await page.locator('#v61DcSuccess').innerText()).includes('Gerilim büyüklüğü ve reaktif güç')) throw Error('DC null-value explanation is missing');
+  const busId = await page.locator('#v61BusSelect option').nth(1).getAttribute('value');
+  if (busId) await page.locator('#v61BusSelect').selectOption(busId);
+  await page.locator('#v61BusAvailability').getByText('DC yük akışı gerilim büyüklüğü hesaplamaz.').waitFor();
   console.log(`Native host full DGS DC: ${dcStatus}`);
   await mkdir('artifacts/ui-review', { recursive: true });
-  await page.screenshot({ path: resolve('artifacts/ui-review/06-analysis-dc-result.png'), animations: 'disabled' });
+  await page.screenshot({ path: resolve('artifacts/ui-review/10-result-unavailable-reason.png'), animations: 'disabled' });
   await page.close();
 
   execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/uninstall-windows.ps1')], { stdio: 'inherit' });

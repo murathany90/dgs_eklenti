@@ -41,6 +41,53 @@ function v43SyncViewSets(){
 /* ---------- ScenarioController (tek senaryo kaynagi) ---------- */
 var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'reference',lastCalcKey:null,solverVersion:V43_SOLVER,
  fingerprint:function(){return v43Fp();},
+ commitMutation:function(){
+  v43AbortSolve(); v4.scenario=null;v4.scenarioSolver=null;SC.revision++;SC.lastCalcKey=null;
+  SC.pending=v4.overrides.size>0||v42.switchOverrides.size>0;SC.viewMode='reference';v3.solver=v4.baseSolver||null;
+  v2.sets.splice(0,v2.sets.length,...(v4.base?[v4.base]:[]));v2.selectedSet=v4.base?.id||'';
+  try{stopFlow();listSets();drawMap();v4OverlayStatus();v4ValidateCalc();v4ScenarioComparison();v42RenderSwitchAnalysis();}catch(_){}
+  try{v43SyncViewSets();v43Refresh();}catch(_){}
+  window.V6Bridge?.scenarioChanged?.();
+  return SC.revision;
+ },
+ touch:function(){return SC.commitMutation();},
+ applySwitch:function(fid,position){
+  var prev=v42.switchOverrides.has(fid)?v42.switchOverrides.get(fid):null;
+  var sw=active?.get('ElmCoup',fid);if(!sw)return false;
+  var next=position===null||Number(sw.on_off)===(position?1:0)?null:(position?1:0);
+  if(prev===next)return true;
+  SC.history.push({kind:'switch',fid:fid,prev:prev,next:next,t:Date.now()});if(SC.history.length>60)SC.history.shift();
+  if(next===null)v42.switchOverrides.delete(fid);else v42.switchOverrides.set(fid,next);
+  SC.commitMutation();return true;
+ },
+ clearSwitches:function(){if(!v42.switchOverrides.size)return true;SC.history.push({kind:'switches',prev:[...v42.switchOverrides],t:Date.now()});if(SC.history.length>60)SC.history.shift();v42.switchOverrides.clear();SC.commitMutation();return true;},
+ applyBundle:function(plan){
+  if(!plan||!active)return false;
+  var line=active.lineById(plan.line);if(!line)return false;
+  var previous={kind:'bundle',lines:[...v4.overrides],switches:[...v42.switchOverrides],restored:window.VirtualEnergizationEngine?.restored?.()||[],t:Date.now()};
+  var lineOff=Number(plan.lineOff)===1?1:0;
+  var linePrev=v4.overrides.has(line.FID)?v4.overrides.get(line.FID):null;
+  var switchChanges=(plan.switches||[]).filter(function(sw){return sw.out!==1;});
+  var restoredBefore=window.VirtualEnergizationEngine?.restored?.()||[];
+  var restoredAfter=[...new Set([...restoredBefore,...(plan.restoredTerminals||[])].map(String))];
+  var restoredChanged=restoredAfter.length!==restoredBefore.length;
+  if(linePrev===lineOff&&!restoredChanged&&switchChanges.every(function(sw){return Number(v42.switchOverrides.get(sw.id)??active.get('ElmCoup',sw.id)?.on_off)===1;}))return true;
+  SC.history.push(previous);if(SC.history.length>60)SC.history.shift();
+  if(linePrev!==lineOff){if(v43OrigApply)v43OrigApply(line.FID,lineOff);else v4.overrides.set(line.FID,lineOff);if(Number(line.outserv)===lineOff)v4.overrides.delete(line.FID);}
+  for(var sw of switchChanges){if(active.get('ElmCoup',sw.id))v42.switchOverrides.set(sw.id,1);}
+  if(restoredChanged)window.VirtualEnergizationEngine?.restore?.(restoredAfter);
+  v4.activeOverrides=v4.overrides.size?v4.overrides:null;
+  SC.commitMutation();v43OpenDrawer(line.FID);return true;
+ },
+ restore:function(snapshot){
+  if(!active||!snapshot)return false;
+  v4.overrides.clear();v42.switchOverrides.clear();
+  for(var entry of snapshot.lines||[])if(Array.isArray(entry)&&active.lineById(entry[0]))v4.overrides.set(entry[0],Number(entry[1])===1?1:0);
+  for(var entry of snapshot.switches||[])if(Array.isArray(entry)&&active.get('ElmCoup',entry[0]))v42.switchOverrides.set(entry[0],Number(entry[1])===1?1:0);
+  try{window.VirtualEnergizationEngine?.restore?.(snapshot.restoredTerminals||[]);}catch(_){}
+  try{var auto=$('v53AutoTerm');if(auto)auto.checked=!!snapshot.autoRestoreTerminals;refreshRestoredEnds();}catch(_){}
+  v4.activeOverrides=v4.overrides.size?v4.overrides:null;SC.history.splice(0);SC.commitMutation();return true;
+ },
  apply:function(id,off){
   try{
    if(!active){v4Notify('Once bir JSON yukleyiniz.',true);return false;}
@@ -54,9 +101,7 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
    v43OrigApply(l.FID,off);
    if(Number(l.outserv)===off)v4.overrides.delete(l.FID);
    v4.activeOverrides=v4.overrides.size?v4.overrides:null;
-   SC.revision++; SC.pending=v4.overrides.size>0||v42.switchOverrides.size>0; SC.lastCalcKey=null;
-   if(!SC.pending){v4.scenario=null;v4.scenarioSolver=null;v43SyncViewSets();v3.solver=v4.baseSolver;}
-   v43Refresh(); v43OpenDrawer(l.FID);
+   SC.commitMutation();v43OpenDrawer(l.FID);
    return true;
   }catch(e){console.warn('SC.apply',e);return false;}
  },
@@ -65,7 +110,13 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
    var hh=SC.history.pop();
    if(!hh){v4Notify('Geri alinacak islem yok.',true);return false;}
    v43AbortSolve();
-   if(hh.prev===null||hh.prev===undefined) v4.overrides.delete(hh.fid); else v4.overrides.set(hh.fid,hh.prev);
+    if(hh.kind==='bundle'){
+     v4.overrides.clear();for(var le of hh.lines)v4.overrides.set(le[0],le[1]);
+     v42.switchOverrides.clear();for(var se of hh.switches)v42.switchOverrides.set(se[0],se[1]);
+     window.VirtualEnergizationEngine?.restore?.(hh.restored||[]);
+    }else if(hh.kind==='switches'){v42.switchOverrides.clear();for(var se of hh.prev)v42.switchOverrides.set(se[0],se[1]);}
+    else if(hh.kind==='switch'){if(hh.prev===null||hh.prev===undefined)v42.switchOverrides.delete(hh.fid);else v42.switchOverrides.set(hh.fid,hh.prev);}
+    else if(hh.prev===null||hh.prev===undefined) v4.overrides.delete(hh.fid); else v4.overrides.set(hh.fid,hh.prev);
    v4.activeOverrides=v4.overrides.size?v4.overrides:null;
    if(v4.base===null&&v2.sets.length&&!v4.scenario) v4.base=v2.sets[0];
    v4.scenario=null; v4.scenarioSolver=null; v2.sets.splice(0); v2.selectedSet=''; v3.solver=null;
@@ -75,8 +126,7 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
    try{v4OverlayStatus();}catch(_){}
    try{v4ValidateCalc();}catch(_){}
    try{v4ScenarioComparison();}catch(_){}
-   SC.revision++; SC.pending=v4.overrides.size>0||v42.switchOverrides.size>0; SC.lastCalcKey=null;
-   if(!SC.pending){v3.solver=v4.baseSolver;SC.viewMode='reference';v43SyncViewSets();}
+    SC.commitMutation();
    v4Notify(hh.fid+': islem geri alindi. '+(SC.pending?'Senaryo hesabi bekliyor.':'Referans hesap geri yuklendi.')+' Orijinal DGS degismedi.');
    v43Refresh(); v43OpenDrawer(hh.fid);
    return true;
@@ -85,11 +135,11 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
  reset:function(){
   try{
    v43AbortSolve();
-   v4.overrides.clear();v42.switchOverrides.clear(); v4.activeOverrides=null; v4.scenario=null;
+    if(!v4.overrides.size&&!v42.switchOverrides.size)return true;
+    v4.overrides.clear();v42.switchOverrides.clear(); v4.activeOverrides=null; v4.scenario=null;
    if(v4.base){v2.sets.splice(0,v2.sets.length,v4.base);v2.selectedSet=v4.base.id;v3.solver=v4.baseSolver;}
    else{v2.sets.splice(0);v2.selectedSet='';v3.solver=null;}
-   SC.history.splice(0); SC.revision++; SC.pending=false; SC.lastCalcKey=null;SC.viewMode='reference';
-   v43SyncViewSets();
+    SC.history.splice(0);SC.commitMutation();
    try{listSets();}catch(_){}
    try{v4ScenarioComparison();}catch(_){}
    try{v4OverlayStatus();}catch(_){}
@@ -130,7 +180,7 @@ var SC=window.ScenarioController={revision:0,history:[],pending:false,viewMode:'
     v4Notify('Senaryo hesabi bitti. '+((v3.solver&&v3.solver.solved)||0)+'/'+((v3.solver&&v3.solver.total)||0)+' ada yakinsadi. Sonuclar DENEYSEL ve referans dogrulamasi yapilmadi.');
     try{v4ScenarioComparison();}catch(_){}
     try{drawMap();}catch(_){}
-    SC.pending=false; SC.lastCalcKey=fp+'|'+rev+'|'+V43_SOLVER;
+    SC.pending=false; SC.lastCalcKey=fp+'|'+rev+'|'+V43_SOLVER; window.V6Bridge?.scenarioCalculated?.();
     v43SyncViewSets();
     v43Refresh();
     if(selectedLine) v43OpenDrawer(selectedLine);
