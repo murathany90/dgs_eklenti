@@ -55,9 +55,9 @@ try {
   await page.locator('#v6Validation').waitFor({ timeout: 120000 });
   if (process.env.DGS_E2E_MODEL) await page.waitForFunction(name => document.querySelector('#v6Validation')?.dataset.modelName === name, basename(process.env.DGS_E2E_MODEL), { timeout: 120000 });
   await page.waitForFunction(() => !!document.querySelector('#v6Metadata')?.dataset.components, null, { timeout: 120000 });
-  if (await page.title() !== 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.4') throw Error(`Workspace title branding mismatch: ${await page.title()}`);
+  if (await page.title() !== 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.5') throw Error(`Workspace title branding mismatch: ${await page.title()}`);
   if (await page.locator('.apphead h1').innerText() !== 'Grid Analyzer' || await page.locator('.brand small').innerText() !== 'Şebeke Analiz Sistemi') throw Error('Workspace header branding missing');
-  if (!(await page.locator('#footerRight').innerText()).includes('Grid Analyzer · Chrome MV3 · v6.1.4')) throw Error('Workspace footer branding missing');
+  if (!(await page.locator('#footerRight').innerText()).includes('Grid Analyzer · Chrome MV3 · v6.1.5')) throw Error('Workspace footer branding missing');
   const visibleBrandText = await page.locator('body').innerText();
   for (const oldName of ['YTBS Şebeke Analiz ve Görüntüleme', 'YTBS Şebeke Görüntüleyici', 'PowerFactory Şebeke Görüntüleyici ve Analiz Sistemi']) {
     if (visibleBrandText.includes(oldName)) throw Error(`Old product branding remains visible: ${oldName}`);
@@ -318,7 +318,7 @@ try {
   await page.screenshot({ path: join(screenshots, 'responsive-1280x720.png'), animations: 'disabled' });
   if (errors.length) throw Error(`Page errors: ${errors.join(' | ')}`);
   const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'));
-  if (manifest.manifest_version !== 3 || manifest.version !== '6.1.4' || manifest.name !== 'Grid Analyzer - Şebeke Analiz Sistemi' || manifest.icons?.['16'] !== 'assets/icons/ga-16.png') throw Error('Manifest V3 / v6.1.4 branding mismatch');
+  if (manifest.manifest_version !== 3 || manifest.version !== '6.1.5' || manifest.name !== 'Grid Analyzer - Şebeke Analiz Sistemi' || manifest.icons?.['16'] !== 'assets/icons/ga-16.png') throw Error('Manifest V3 / v6.1.5 branding mismatch');
   for (const size of [16, 32, 48, 128]) {
     const png = await readFile(resolve(`dist/assets/icons/ga-${size}.png`));
     if (png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) throw Error(`Packaged ga-${size}.png has incorrect dimensions`);
