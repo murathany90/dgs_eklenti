@@ -191,8 +191,24 @@ class ProtocolTests(unittest.TestCase):
         input_stream.seek(0)
         serve(input_stream, output_stream)
         output_stream.seek(0)
+        self.assertEqual(read_message(output_stream)["type"], "HELLO_ACK")
         self.assertEqual(read_message(output_stream)["type"], "CAPABILITIES")
         self.assertEqual(read_message(output_stream)["code"], "UNKNOWN_COMMAND")
+
+    def test_hello_reports_pandapower_import_error(self):
+        input_stream, output_stream = io.BytesIO(), io.BytesIO()
+        write_message({"type": "HELLO", "protocolVersion": "1.0", "requestId": "r", "jobId": "j"}, input_stream)
+        input_stream.seek(0)
+        original_import = __import__
+        def fail_pandapower(name, *args, **kwargs):
+            if name == "pandapower":
+                raise ImportError("pandapower unavailable")
+            return original_import(name, *args, **kwargs)
+        with patch("builtins.__import__", side_effect=fail_pandapower):
+            serve(input_stream, output_stream)
+        output_stream.seek(0)
+        self.assertEqual(read_message(output_stream)["type"], "HELLO_ACK")
+        self.assertEqual(read_message(output_stream)["code"], "PANDAPOWER_IMPORT_ERROR")
 
     def test_chunked_model_and_result_roundtrip(self):
         model = base(); line(model); load(model, 1, 10, 2)

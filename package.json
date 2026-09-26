@@ -1,15 +1,20 @@
 {
   "name": "ytbs-dgs-extension",
-  "version": "6.1.3",
+  "version": "6.1.4",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=22" },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "node tools/lint.mjs",
     "test": "node --import tsx --test tests/unit/*.test.mjs",
     "test:integration": "node --import tsx --test tests/integration/*.test.mjs",
     "test:e2e": "node tests/e2e/extension.mjs",
+    "test:e2e:states": "node tests/e2e/conflicting-calculation-states.mjs",
+    "test:e2e:conflicting-states": "node tests/e2e/conflicting-calculation-states.mjs",
     "test:e2e:large-model": "node tests/e2e/large-model-responsive.mjs",
+    "test:e2e:map-results": "node tests/e2e/map-electrical-results.mjs",
+    "test:e2e:native-health": "node tests/e2e/native-health.mjs",
     "test:e2e:native": "node tests/e2e/native-host.mjs",
     "build": "node tools/build.mjs"
   },

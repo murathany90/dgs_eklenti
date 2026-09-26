@@ -1,5 +1,6 @@
 const ENGINE_LABELS: Record<string, string> = {
   'browser-approx': 'Tarayıcı Yaklaşık Çözüm',
+  'browser-approx-v5.5': 'Tarayıcı Yaklaşık Çözüm',
   pandapower: 'Yerel Tam Şebeke',
 };
 

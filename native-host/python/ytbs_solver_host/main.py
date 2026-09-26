@@ -7,16 +7,16 @@ import time
 import uuid
 from . import PROTOCOL_VERSION
 from .protocol import read_message, write_message
-from .pandapower_adapter import run
-from .network_mapper import prepare
 
 MAX_MODEL_BYTES = 128 * 1024 * 1024
 RESULT_CHUNK_BYTES = 192 * 1024
 
 
-def serve(reader=None, writer=None):
+def serve(reader=None, writer=None, announce_start=False):
     reader = reader or sys.stdin.buffer
     writer = writer or sys.stdout.buffer
+    if announce_start:
+        write_message({"type": "HOST_STARTED", "protocolVersion": PROTOCOL_VERSION, "requestId": "", "jobId": ""}, writer)
     job = None
     while True:
         base = None
@@ -35,7 +35,13 @@ def serve(reader=None, writer=None):
                 send("ERROR", code="PROTOCOL_VERSION", message="unsupported protocol version")
                 continue
             if kind in ("HELLO", "CAPABILITIES"):
-                send("CAPABILITIES", engine="pandapower", engineVersion=__import__("pandapower").__version__, ac=True, dc=True,
+                send("HELLO_ACK")
+                try:
+                    engine_version = __import__("pandapower").__version__
+                except ImportError as exc:
+                    send("ERROR", code="PANDAPOWER_IMPORT_ERROR", message=str(exc)[:300])
+                    continue
+                send("CAPABILITIES", engine="pandapower", engineVersion=engine_version, ac=True, dc=True,
                      maxModelBytes=MAX_MODEL_BYTES, chunkBytes=RESULT_CHUNK_BYTES)
             elif kind == "PING":
                 send("PONG")
@@ -63,12 +69,14 @@ def serve(reader=None, writer=None):
                 del job["bytes"]
                 send("PROGRESS", phase="MODEL_READY")
             elif kind == "PREFLIGHT":
+                from .network_mapper import prepare
                 if not job or job_id != job["id"] or not isinstance(job.get("model"), dict):
                     raise ValueError("model not ready")
                 send("PROGRESS", phase="AC_PREFLIGHT")
                 job["prepared"], job["diagnostics"] = prepare(job["model"])
                 send("DIAGNOSTICS", diagnostics=job["diagnostics"])
             elif kind == "RUN_LOAD_FLOW":
+                from .pandapower_adapter import run
                 if not job or job_id != job["id"] or not isinstance(job.get("model"), dict):
                     raise ValueError("model not ready")
                 mode = msg.get("mode")
@@ -102,7 +110,7 @@ def serve(reader=None, writer=None):
 
 
 def main():
-    serve()
+    serve(announce_start=True)
 
 
 if __name__ == "__main__":

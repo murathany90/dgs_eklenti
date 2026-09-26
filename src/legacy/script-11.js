@@ -6,7 +6,7 @@
  const restored=new Set();
  const originalRestored=window.YTBS_V53?.isTerminalRestored?.bind(window.YTBS_V53);
  if(window.YTBS_V53){window.YTBS_V53.isTerminalRestored=id=>restored.has(String(id))||(originalRestored?originalRestored(id):false);}
- function currentSet(){return typeof resultSet==='function'?resultSet():null;}
+ function currentSet(){return typeof mapResultSet==='function'?mapResultSet():null;}
  function pathLength(px){let n=0;for(let i=1;i<px.length;i++)n+=Math.hypot(px[i][0]-px[i-1][0],px[i][1]-px[i-1][1]);return n;}
  function loadingPct(line){try{const season=E('v4Season')?.value||'nominal';const out=window.LineCapacityEngine?.loading?.(line,season);return Number.isFinite(out?.percent)?out.percent:null;}catch(_){return null;}}
  function speedFactor(load){const mult={slow:.72,normal:1,fast:1.35}[flowCfg.speed]||1;if(!Number.isFinite(load))return .78*mult;return (.52+clamp(load,0,120)/120*1.15)*mult;}

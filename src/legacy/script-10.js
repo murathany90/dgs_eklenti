@@ -26,6 +26,7 @@
  window.v54ClearMapSelection=clearSelection;
  function compactLine(){const l=validLine(),d=E('v43Drawer');if(!l||!d)return;
   let el=E('v54CompactLine');if(!el){el=document.createElement('div');el.id='v54CompactLine';d.querySelector('#v43Body').before(el);}
+  if(window.YTBS_ActiveMapResult?.selectionHtml){el.innerHTML=window.YTBS_ActiveMapResult.selectionHtml('line',l.FID);return;}
   const stale=ScenarioController.pending&&ScenarioController.viewMode!=='reference';
   const get=(m)=>stale?null:latestResult('ElmLne',l.FID,m,'from');
   const p=get('P'),q=get('Q'),c=window.YTBS_V53_TEST?.line(l.FID),ld=stale?null:window.YTBS_V53_TEST?.loading(l.FID);

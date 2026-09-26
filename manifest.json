@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Grid Analyzer - Şebeke Analiz Sistemi",
-  "version": "6.1.3",
+  "version": "6.1.4",
+  "minimum_chrome_version": "116",
   "description": "Elektrik şebekesi modellerinin görüntülenmesi, topoloji incelemesi ve elektriksel analizleri için yerel mühendislik uygulaması.",
   "icons": { "16": "assets/icons/ga-16.png", "32": "assets/icons/ga-32.png", "48": "assets/icons/ga-48.png", "128": "assets/icons/ga-128.png" },
   "action": { "default_title": "Grid Analyzer", "default_icon": { "16": "assets/icons/ga-16.png", "32": "assets/icons/ga-32.png" } },

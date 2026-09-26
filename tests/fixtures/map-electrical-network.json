@@ -1,0 +1,303 @@
+{
+  "General": {
+    "Attributes": [
+      "FID",
+      "Descr",
+      "Val"
+    ],
+    "Values": [
+      [
+        "GENERAL",
+        "Version",
+        "7.0"
+      ]
+    ]
+  },
+  "SetTime": {
+    "Attributes": [
+      "FID",
+      "cDate",
+      "cTime"
+    ],
+    "Values": [
+      [
+        "TIME",
+        "20260925",
+        "120000"
+      ]
+    ]
+  },
+  "ElmSite": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "fold_id",
+      "sType"
+    ],
+    "Values": [
+      [
+        "M1",
+        "Ankara Kuzey TM",
+        "Y1",
+        "GERCEK"
+      ],
+      [
+        "M2",
+        "Ankara Güney TM",
+        "Y1",
+        "GERCEK"
+      ]
+    ]
+  },
+  "ElmSubstat": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "fold_id",
+      "GPSlat",
+      "GPSlon"
+    ],
+    "Values": [
+      [
+        "G1",
+        "154 kV bara grubu",
+        "M1",
+        39.96,
+        32.82
+      ],
+      [
+        "G2",
+        "154 kV bara grubu",
+        "M2",
+        39.86,
+        32.88
+      ],
+      [
+        "G3",
+        "66 kV bara grubu",
+        "M2",
+        39.86,
+        32.88
+      ]
+    ]
+  },
+  "ElmTerm": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "fold_id",
+      "uknom",
+      "outserv"
+    ],
+    "Values": [
+      [
+        "B1",
+        "Kuzey 154 kV Bara",
+        "G1",
+        154,
+        0
+      ],
+      [
+        "B2",
+        "Güney 154 kV Bara",
+        "G2",
+        154,
+        0
+      ],
+      [
+        "B3",
+        "Güney 66 kV Bara",
+        "G3",
+        66,
+        0
+      ]
+    ]
+  },
+  "StaCubic": {
+    "Attributes": [
+      "FID",
+      "fold_id",
+      "obj_id"
+    ],
+    "Values": [
+      [
+        "C1",
+        "B1",
+        "H1"
+      ],
+      [
+        "C2",
+        "B2",
+        "H1"
+      ],
+      [
+        "C3",
+        "B2",
+        "T1"
+      ],
+      [
+        "C4",
+        "B3",
+        "T1"
+      ],
+      [
+        "C5",
+        "B1",
+        "SL1"
+      ],
+      [
+        "C6",
+        "B3",
+        "L1"
+      ]
+    ]
+  },
+  "TypLne": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "uline",
+      "sline",
+      "rline",
+      "xline",
+      "bline"
+    ],
+    "Values": [
+      [
+        "HT1",
+        "154 kV iletim hattı",
+        154,
+        1,
+        0.05,
+        0.3,
+        0
+      ]
+    ]
+  },
+  "ElmLne": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "fold_id",
+      "typ_id",
+      "dline",
+      "outserv",
+      "bus1",
+      "bus2"
+    ],
+    "Values": [
+      [
+        "H1",
+        "Ankara Kuzey-Güney Hattı",
+        "Y1",
+        "HT1",
+        10,
+        0,
+        "C1",
+        "C2"
+      ]
+    ]
+  },
+  "TypTr2": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "strn",
+      "utrn_h",
+      "utrn_l",
+      "pcutr",
+      "uktr",
+      "pfe",
+      "curmg",
+      "nntap0",
+      "tap_side",
+      "dutap",
+      "itapch",
+      "shift_degree"
+    ],
+    "Values": [
+      [
+        "TT1",
+        "154/66 kV transformatör",
+        100,
+        154,
+        66,
+        300,
+        10,
+        10,
+        0.1,
+        0,
+        0,
+        1.25,
+        0,
+        0
+      ]
+    ]
+  },
+  "ElmTr2": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "fold_id",
+      "typ_id",
+      "outserv",
+      "nntap",
+      "bushv",
+      "buslv"
+    ],
+    "Values": [
+      [
+        "T1",
+        "Güney 154/66 kV Trafo",
+        "M2",
+        "TT1",
+        0,
+        0,
+        "C3",
+        "C4"
+      ]
+    ]
+  },
+  "ElmXnet": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "fold_id",
+      "bus1",
+      "outserv",
+      "usetp"
+    ],
+    "Values": [
+      [
+        "SL1",
+        "Referans şebeke",
+        "G1",
+        "C5",
+        0,
+        1
+      ]
+    ]
+  },
+  "ElmLod": {
+    "Attributes": [
+      "FID",
+      "loc_name",
+      "fold_id",
+      "bus1",
+      "plini",
+      "qlini",
+      "outserv"
+    ],
+    "Values": [
+      [
+        "L1",
+        "Güney tüketimi",
+        "G3",
+        "C6",
+        35,
+        12,
+        0
+      ]
+    ]
+  }
+}

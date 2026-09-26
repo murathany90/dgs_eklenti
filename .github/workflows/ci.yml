@@ -1,4 +1,4 @@
-name: MV3 electrical core
+name: Grid Analyzer v6.1.4 verification
 on:
   push:
   pull_request:
@@ -27,6 +27,10 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: UI and screenshot review
         run: npm run test:e2e
+      - name: Host and calculation state regression
+        run: npm run test:e2e:states
+      - name: Map electrical results regression
+        run: npm run test:e2e:map-results
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -34,3 +38,19 @@ jobs:
           path: artifacts/ui-review/
           if-no-files-found: warn
           retention-days: 14
+  native-health-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npx playwright install chromium
+      - name: Real Chrome Native Messaging health (no DGS)
+        run: npm run test:e2e:native-health
