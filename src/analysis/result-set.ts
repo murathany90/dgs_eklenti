@@ -12,6 +12,7 @@ export interface BranchResult extends ResultBase { kind: 'LINE' | 'SERIES_COMPEN
 export interface TransformerResult extends ResultBase { hvBus: string | null; lvBus: string | null; hv: BranchEndResult; lv: BranchEndResult; loadingPercent: number | null; pLossMw: number | null; qLossMvar: number | null; tapPosition: number | null }
 export interface GeneratorResult extends ResultBase { bus: string | null; powerFactoryClass?: 'ElmSym' | 'ElmGenStat'; pMw: number | null; qMvar: number | null; vPu: number | null; limitState: 'WITHIN' | 'AT_MIN' | 'AT_MAX' | 'UNKNOWN' }
 export interface ExternalGridResult extends ResultBase { bus: string | null; pMw: number | null; qMvar: number | null }
+export interface InternationalConnectionResult extends ResultBase { pMw: number | null; qMvar: number | null; mappingMode: 'FIXED_PQ_LOAD_APPROXIMATION' | 'SOURCE_ONLY' }
 export interface NetworkSummary {
   generationMw: number | null; generationMvar: number | null; loadMw: number | null; loadMvar: number | null;
   activeLossMw: number | null; reactiveLossMvar: number | null; busCount: number; lineCount: number; transformerCount: number;
@@ -32,6 +33,12 @@ export interface ACPreflightDiagnostics {
   unsupportedOrUnsolvedControlCount: number; openSwitchCount: number; closedSwitchCount: number;
   stationControlCount?: number; stationControlsInService?: number; remoteVoltageControllerCount?: number;
   remoteVoltageControllersApplied?: number; reactiveSharingRecordCount?: number; reactiveSharingGroupsApplied?: number; droopRecordCount?: number; droopControllersApplied?: number;
+  internationalConnectionCount?: number; internationalConnectionsInService?: number; internationalConnectionsMapped?: number;
+  internationalPmw?: number; internationalQmvar?: number; internationalMappingMode?: string;
+  stationControllersTotal?: number; stationControllersApplied?: number; stationControllersApproximate?: number; stationControllersUnsupported?: number;
+  multiUnitControllersTotal?: number; multiUnitControllersApplied?: number; multiUnitControllersApproximate?: number;
+  droopControllersTotal?: number; droopControllersPartial?: number; secondaryControllersTotal?: number; boundariesTotal?: number;
+  activePowerBalancingModeCode?: number | null; activePowerBalancingBehavior?: string;
   elmGenStatQLimitCoverage?: { available: number; total: number };
   transformerPhaseAngleCoverage?: { total: number; available: number };
   transformerWindingConnectionCoverage?: { total: number; available: number };
@@ -42,6 +49,10 @@ export interface ACPreflightDiagnostics {
 }
 export interface CalculationDiagnostics {
   diagnosticOnly: true; innerIterations: number | null; outerIterations: number | null;
+  innerSolverConverged?: boolean | null; controlSystemConverged?: boolean | null; convergenceMethod?: string | null;
+  nonConvergenceReason?: 'INNER_NR_DIVERGED' | 'OUTER_CONTROL_DIVERGED' | 'CONTROL_EXHAUSTED' | 'Q_LIMIT_EXHAUSTED'
+    | 'ISLAND_WITHOUT_SLACK' | 'INVALID_MODEL' | 'INVALID_IMPEDANCE' | 'UNSUPPORTED_REQUIRED_CONTROL'
+    | 'VOLTAGE_CONTROL_NOT_SATISFIED' | 'ACTIVE_POWER_BALANCE_NOT_SATISFIED' | null;
   maxPMismatchMw: number | null; maxQMismatchMvar: number | null; voltagePuMin: number | null; voltagePuMax: number | null;
   qMinHits?: number | null; qMaxHits?: number | null; pvToPqCount: number | null;
   residualStatus: 'AVAILABLE' | 'UNAVAILABLE'; residualReason: string | null;
@@ -55,7 +66,9 @@ export interface ResultSet {
   validation: Integrity; warnings: string[]; unsupported: UnsupportedResult[];
   buses: BusResult[]; branches: BranchResult[]; transformers: TransformerResult[]; generators: GeneratorResult[];
   externalGrids: ExternalGridResult[]; losses: Array<{ id: string; pMw: number | null; qMvar: number | null }>;
+  internationalConnections?: InternationalConnectionResult[];
   summary: NetworkSummary; preflight?: ACPreflightDiagnostics;
+  solverOptions?: Record<string, unknown>;
   calculationDiagnostics?: CalculationDiagnostics;
   performance?: { conversionMs: number; solveMs: number; serializationMs?: number };
   resultAvailability: ResultAvailability;

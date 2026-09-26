@@ -12,6 +12,9 @@ export function mapLoadFlowSettings(ctx: DgsContext): CanonicalLoadFlowSettings 
   const values = {
     iopt_lim: numeric(row?.iopt_lim), itrlx: numeric(row?.itrlx), ictrlx: numeric(row?.ictrlx),
     errlf: numeric(row?.errlf), erreq: numeric(row?.erreq), iPbalancing: numeric(row?.iPbalancing),
+    iopt_chctr: numeric(row?.iopt_chctr), iShowOutLoopMsg: numeric(row?.iShowOutLoopMsg),
+    iopt_initOPF: numeric(row?.iopt_initOPF), iItAlgStag: numeric(row?.iItAlgStag),
+    iInterChg: numeric(row?.iInterChg), iInterType: numeric(row?.iInterType),
   };
   const limitCode = values.iopt_lim;
   const enforceReactiveLimits = limitCode === 0 ? false : limitCode === 1 ? true : null;

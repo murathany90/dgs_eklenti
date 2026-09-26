@@ -4,10 +4,19 @@ import { DgsContext, inService, numeric, reference } from './context.ts';
 export const ENGINE_CAPABILITIES: Record<string, Support> = {
   slackBus: 'SUPPORTED', multipleExternalGrids: 'PARTIAL', pvPqBuses: 'SUPPORTED', generatorVoltageSetpoint: 'SUPPORTED',
   qLimitsPvToPq: 'SUPPORTED', pLimits: 'PARTIAL', parallelGeneratorReactiveSharing: 'PARTIAL',
-  remoteVoltageControl: 'PARTIAL', reactiveParticipation: 'PARTIAL', droop: 'UNSUPPORTED',
+  remoteVoltageControl: 'PARTIAL', reactiveParticipation: 'PARTIAL', droop: 'PARTIAL',
   transformerStaticTap: 'SUPPORTED', transformerOltcAutomatic: 'UNSUPPORTED', switchedShuntStaticStep: 'SUPPORTED',
   seriesCompensation: 'PARTIAL', transformerPhaseShift: 'SUPPORTED',
 };
+export function computeReactiveParticipation(generators: Array<Pick<CanonicalGenerator, 'id' | 'pMw' | 'inService'>>, mode: 'ACTIVE_POWER_WEIGHTED_APPROXIMATION'):
+  { weights: number[] | null; status: 'APPROXIMATE' | 'UNRESOLVED'; reason: string } {
+  if (!generators.length || generators.some(item => !item.inService || item.pMw === null || item.pMw <= 0)) {
+    return { weights: null, status: 'UNRESOLVED', reason: 'All participants must be in service with positive active-power dispatch' };
+  }
+  const total = generators.reduce((sum, item) => sum + item.pMw!, 0);
+  if (!Number.isFinite(total) || total <= 0) return { weights: null, status: 'UNRESOLVED', reason: 'Positive active-power dispatch total is unavailable' };
+  return { weights: generators.map(item => item.pMw! / total), status: 'APPROXIMATE', reason: `${mode}: normalized active-power dispatch; YTBS Kqi formula was not available to verify` };
+}
 export function mapControls(ctx: DgsContext, generators: CanonicalGenerator[], transformers: CanonicalTransformer[], shunts: CanonicalShunt[]): CanonicalControl[] {
   const controls: CanonicalControl[] = [];
   for (const gen of generators) if (gen.controlMode === 'PV') controls.push({ id: `voltage:${gen.id}`, kind: 'VOLTAGE', targetId: gen.id, setpoint: gen.vmPu, mode: 'constv', support: 'SUPPORTED', mappingStatus: 'SOLVED' });
@@ -33,7 +42,7 @@ export function mapControls(ctx: DgsContext, generators: CanonicalGenerator[], t
       share: numeric(row[`cvqq:${slot.slice(5)}`]),
     }));
     const allSourceShares = shareSlots.length > 0 && shareSlots.every(item => Boolean(item.generatorId) && item.share !== null && item.share > 0);
-    const controlledGeneratorShares = allSourceShares ? shareSlots.map(item => item.share! / 100) : undefined;
+    let controlledGeneratorShares = allSourceShares ? shareSlots.map(item => item.share! / 100) : undefined;
     const membershipComplete = memberSlots.length > 0 && controlledGeneratorIds.length === memberSlots.length;
     const controlModeCode = numeric(row.i_ctrl);
     const controllerMode = controlModeCode === 0 ? 'VOLTAGE' : controlModeCode === 1 ? 'REACTIVE_POWER'
@@ -42,16 +51,28 @@ export function mapControls(ctx: DgsContext, generators: CanonicalGenerator[], t
     const droopEnabled = droopCode === 0 ? false : droopCode === 1 ? true : null;
     const reactiveSharingModeCode = numeric(row.imode);
     const candidates = generators.filter(generator => controlledGeneratorIds.includes(generator.id));
+    let distributionMode: CanonicalControl['distributionMode'] = controlledGeneratorIds.length === 1 ? 'SINGLE_UNIT' : allSourceShares ? 'SOURCE_CVQQ' : 'UNRESOLVED';
+    let approximateParticipation = false;
+    if (controlledGeneratorIds.length > 1 && !allSourceShares && droopEnabled === false && candidates.length === controlledGeneratorIds.length) {
+      const participation = computeReactiveParticipation(candidates, 'ACTIVE_POWER_WEIGHTED_APPROXIMATION');
+      if (participation.weights) {
+        controlledGeneratorShares = participation.weights;
+        distributionMode = 'ACTIVE_POWER_WEIGHTED_APPROXIMATION';
+        approximateParticipation = true;
+        ctx.finding('REACTIVE_SHARING_ACTIVE_POWER_APPROXIMATION', 'APPROXIMATION', id, participation.reason);
+      }
+    }
     const limitsAvailable = candidates.length === controlledGeneratorIds.length && candidates.every(generator => generator.inService
       && generator.referenceMachine !== true && generator.qMinMvar !== null && generator.qMaxMvar !== null && generator.qMinMvar <= generator.qMaxMvar);
-    const sharesAvailable = controlledGeneratorIds.length === 1 || (reactiveSharingModeCode !== null && reactiveSharingModeCode <= 2 && allSourceShares);
+    const sharesAvailable = controlledGeneratorIds.length === 1 || Boolean(controlledGeneratorShares?.length === controlledGeneratorIds.length
+      && controlledGeneratorShares.every(share => share > 0));
     const eligibleForOuterLoop = inService(row.outserv) && controllerMode === 'VOLTAGE' && selectedBusCode === 0
       && controlledBus !== null && numeric(row.usetp) !== null && controlledGeneratorIds.length > 0
       && membershipComplete && droopEnabled === false && limitsAvailable && sharesAvailable;
     if (controllerMode === 'UNKNOWN') ctx.finding('STATION_CONTROL_MODE_UNKNOWN', 'WARNING', id, `ElmStactrl.i_ctrl=${String(row.i_ctrl ?? '')} çözümlenmedi`);
     if (selectedBusCode !== null && selectedBusCode !== 0) ctx.finding('STATION_CONTROL_BUS_MODE_UNSUPPORTED', 'WARNING', id, `ElmStactrl.selBus=${selectedBusCode}; yalnız doğrulanmış selBus=0/rembar eşlemesi kullanılır`);
-    if (controlledGeneratorIds.length > 1 && !allSourceShares) ctx.finding('REACTIVE_SHARING_DATA_INCOMPLETE', 'WARNING', id, 'Birden fazla kontrollü üretim var fakat kaynak cvqq katılım payı dışa aktarılmamış; eşit paylaşım yapılmadı');
-    if (droopEnabled === true) ctx.finding('DROOP_MAPPING_UNRESOLVED', 'WARNING', id, 'Droop bayrağı ve alanları korundu; işaret, taban ve ölü bant bu DGS için doğrulanmadı');
+    if (controlledGeneratorIds.length > 1 && !allSourceShares && !approximateParticipation) ctx.finding('REACTIVE_SHARING_DATA_INCOMPLETE', 'WARNING', id, 'cvqq dışa aktarılmadı ve katılımcı dispatch değerlerinden güvenli ağırlık üretilemedi; üyelik korunuyor');
+    if (droopEnabled === true) ctx.finding('DROOP_MAPPING_UNRESOLVED', 'WARNING', id, 'Droop bayrağı, Srated ve ddroop korundu; ddroop işareti/ölçeği ve pQmeas noktası bu DGS için doğrulanmadığından droop sayısal uygulanmıyor');
     controls.push({
       id: `station:${id}`, kind: 'STATION', targetId: id,
       sourceRefs: { powerFactoryClass: 'ElmStactrl', fid: id, ...(controlledBusRef ? { controlledBusRaw: controlledBusRef } : {}) }, inService: inService(row.outserv),
@@ -60,7 +81,9 @@ export function mapControls(ctx: DgsContext, generators: CanonicalGenerator[], t
       setpoint: numeric(row.usetp), mode: `ElmStactrl.i_ctrl=${String(row.i_ctrl ?? 'UNKNOWN')}`, controllerMode,
       controlModeCode, reactiveSharingModeCode, selectedBusModeCode: selectedBusCode,
       droopEnabled, droopPercent: null, droopRatedMvar: null, droopRawValue: numeric(row.ddroop), droopRatedRaw: numeric(row.Srated),
-      mappingStatus: eligibleForOuterLoop ? 'SOLVED' : 'MAPPED_BUT_NOT_SOLVED', support: eligibleForOuterLoop ? 'SUPPORTED' : 'PARTIAL',
+      distributionMode,
+      mappingStatus: eligibleForOuterLoop ? (approximateParticipation ? 'APPROXIMATE' : 'SOLVED') : 'MAPPED_BUT_NOT_SOLVED',
+      support: eligibleForOuterLoop && !approximateParticipation ? 'SUPPORTED' : 'PARTIAL',
     });
     if (!eligibleForOuterLoop) ctx.finding('STATION_CONTROL_MAPPED_NOT_SOLVED', 'APPROXIMATION', id, 'Kontrol kaynağı korundu; eksik veya belirsiz alanlar çözücü eylemi dışında bırakıldı');
   }

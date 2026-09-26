@@ -28,6 +28,7 @@ for mode in ("AC", "DC"):
         "validation": result["validation"], "summary": result["summary"], "numericResultCounts": {"buses": len(result["buses"]), "branches": len(result["branches"]),
         "transformers": len(result["transformers"]), "generators": len(result["generators"])},
         "unsupportedCount": len(result["unsupported"]), "unsupportedByKind": dict(collections.Counter(item["kind"] for item in result["unsupported"])),
+        "calculationDiagnostics": result.get("calculationDiagnostics"), "solverOptions": result.get("solverOptions"),
         "warnings": result["warnings"][:3]})
 output["acRootCauseDiagnostics"] = diagnose_ac(model, prepared, diagnostic)
 print(json.dumps(output, allow_nan=False, separators=(",", ":")))
@@ -56,7 +57,7 @@ try {
     const staticGenerators = electrical.generators.filter(generator => generator.sourceRefs.powerFactoryClass === 'ElmGenStat');
     const report = {
       file: input, status: 'PASS', sourceBytes: bytes.length, modelHash, readMs, electricalMappingMs: mapMs,
-      electricalCounts: Object.fromEntries(['buses', 'lines', 'transformers', 'generators', 'loads', 'shunts', 'seriesCompensators', 'externalGrids', 'switches'].map(key => [key, electrical[key].length])),
+      electricalCounts: Object.fromEntries(['buses', 'lines', 'transformers', 'generators', 'loads', 'shunts', 'seriesCompensators', 'externalGrids', 'switches', 'internationalConnections', 'secondaryControllers', 'boundaries'].map(key => [key, electrical[key].length])),
       findings: electrical.findingCounts,
       qLimitCoverage: { pvUnits: pv.length, pvUnitsWithBothLimits: pv.filter(item => item.qMinMvar !== null && item.qMaxMvar !== null).length,
         elmGenStatUnits: staticGenerators.length, elmGenStatWithBothLimits: staticGenerators.filter(item => item.qMinMvar !== null && item.qMaxMvar !== null).length,
@@ -64,6 +65,8 @@ try {
       stationControls: { total: stationControls.length, inService: stationControls.filter(item => item.inService).length,
         controlledBus: stationControls.filter(item => item.controlledBus).length,
         withGeneratorReferences: stationControls.filter(item => item.controlledGeneratorIds?.length).length,
+        mappedExactly: stationControls.filter(item => item.mappingStatus === 'SOLVED').length,
+        mappedApproximately: stationControls.filter(item => item.mappingStatus === 'APPROXIMATE').length,
         mappedButNotSolved: stationControls.filter(item => item.mappingStatus === 'MAPPED_BUT_NOT_SOLVED').length,
         controlModeCodes: Object.fromEntries(stationControls.reduce((counts, item) => counts.set(String(item.controlModeCode), (counts.get(String(item.controlModeCode)) ?? 0) + 1), new Map())),
         reactiveSharingModeCodes: Object.fromEntries(stationControls.reduce((counts, item) => counts.set(String(item.reactiveSharingModeCode), (counts.get(String(item.reactiveSharingModeCode)) ?? 0) + 1), new Map())) },
@@ -80,7 +83,13 @@ try {
         transformerWindingConnections: electrical.transformers.filter(item => item.hvWindingConnection && item.lvWindingConnection).length,
         negativeX: native.diagnostics.negativeReactanceCount,
         seriesCompensationCandidatePaths: native.diagnostics.candidateNonPositiveCompensatedPathCount,
-        initialActivePowerImbalanceMw: native.diagnostics.initialPImbalanceMw },
+        initialActivePowerImbalanceMw: native.diagnostics.initialPImbalanceMw,
+        internationalConnections: { total: native.diagnostics.internationalConnectionCount, mapped: native.diagnostics.internationalConnectionsMapped,
+          inService: native.diagnostics.internationalConnectionsInService, pMw: native.diagnostics.internationalPmw, qMvar: native.diagnostics.internationalQmvar },
+        stationControllerApplication: { total: native.diagnostics.stationControllersTotal, applied: native.diagnostics.stationControllersApplied,
+          approximate: native.diagnostics.stationControllersApproximate, unsupported: native.diagnostics.stationControllersUnsupported,
+          multiUnitTotal: native.diagnostics.multiUnitControllersTotal, multiUnitApplied: native.diagnostics.multiUnitControllersApplied,
+          droopTotal: native.diagnostics.droopControllersTotal, droopApplied: native.diagnostics.droopControllersApplied } },
       engineCapabilities: electrical.engineCapabilities, modelCoverage: electrical.modelCoverage,
       preflightMs: native.preflightMs, preflight: native.diagnostics, solves: native.solves, acRootCauseDiagnostics: native.acRootCauseDiagnostics,
     };

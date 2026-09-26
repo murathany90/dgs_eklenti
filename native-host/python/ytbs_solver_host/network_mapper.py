@@ -18,7 +18,7 @@ def convert(model):
         raise ValueError("invalid electrical canonical network")
     started = time.perf_counter()
     net = pp.create_empty_network(f_hz=50.0, sn_mva=100.0)
-    ids = {kind: {} for kind in ("bus", "line", "trafo", "gen", "sgen", "load", "shunt", "ext_grid", "switch", "impedance")}
+    ids = {kind: {} for kind in ("bus", "line", "trafo", "gen", "sgen", "load", "international", "shunt", "ext_grid", "switch", "impedance")}
     unsupported = []
     def missing(kind, item, reason):
         unsupported.append({"kind": kind, "id": str(item.get("id", "?")), "reason": reason})
@@ -107,7 +107,7 @@ def convert(model):
     net["ytbs_load_flow_settings"] = settings
     station_controls = [item for item in model.get("controls", []) if item.get("kind") == "STATION" and item.get("inService") is True]
     net["ytbs_station_controls"] = station_controls
-    solved_station_members = {generator_id for control in station_controls if control.get("mappingStatus") == "SOLVED"
+    solved_station_members = {generator_id for control in station_controls if control.get("mappingStatus") in ("SOLVED", "APPROXIMATE")
         and control.get("controllerMode") == "VOLTAGE" and control.get("droopEnabled") is False
         for generator_id in control.get("controlledGeneratorIds", [])}
     all_station_members = {generator_id for control in station_controls for generator_id in control.get("controlledGeneratorIds", [])}
@@ -180,6 +180,25 @@ def convert(model):
             p_mw=[item["pMw"] for item in valid_loads], q_mvar=[item["qMvar"] for item in valid_loads],
             name=[item.get("name") for item in valid_loads], in_service=[item.get("inService") is True for item in valid_loads])
         ids["load"].update((item["id"], int(index)) for item, index in zip(valid_loads, indices))
+
+    # ElmVac is not an ext_grid. Preserve the source model and use its explicit Pload/Qload
+    # only through this clearly labelled fixed-PQ approximation.
+    valid_international = []
+    for item in model.get("internationalConnections", []):
+        if item.get("mappingMode") != "FIXED_PQ_LOAD_APPROXIMATION":
+            missing("international_connection", item, "ElmVac source behavior is preserved but unsupported by the fixed-PQ adapter")
+            continue
+        if not endpoints(item, "bus") or not all(_number(item.get(key)) for key in ("pLoadMw", "qLoadMvar")):
+            missing("international_connection", item, "missing bus or Pload/Qload")
+            continue
+        valid_international.append(item)
+    if valid_international:
+        indices = pp.create_loads(net, [ids["bus"][item["bus"]] for item in valid_international],
+            p_mw=[item["pLoadMw"] for item in valid_international], q_mvar=[item["qLoadMvar"] for item in valid_international],
+            name=[item.get("name") for item in valid_international], in_service=[item.get("inService") is True for item in valid_international])
+        ids["international"].update((item["id"], int(index)) for item, index in zip(valid_international, indices))
+        for item in valid_international:
+            missing("international_connection_behavior", item, "ElmVac Pload/Qload mapped consumption-positive as fixed PQ; itype and source-impedance behavior are not solved")
 
     for item in model.get("shunts", []):
         if not endpoints(item, "bus") or not _number(item.get("qMvarPerStep")) or not _number(item.get("currentStep")):
@@ -273,8 +292,11 @@ def preflight(model, net=None, ids=None, unsupported=None):
     in_service_gens = [item for item in model.get("generators", []) if item.get("id") in ids["gen"] or item.get("id") in ids["sgen"]]
     in_service_gens = [item for item in in_service_gens if item.get("inService") is True]
     loads = [item for item in model.get("loads", []) if item.get("id") in ids["load"] and item.get("inService") is True]
+    international = [item for item in model.get("internationalConnections", []) if item.get("id") in ids["international"] and item.get("inService") is True]
     total_gen_mw = sum(num(item.get("pMw")) or 0.0 for item in in_service_gens)
-    total_load_mw = sum(num(item.get("pMw")) or 0.0 for item in loads)
+    international_p_mw = sum(num(item.get("pLoadMw")) or 0.0 for item in international)
+    international_q_mvar = sum(num(item.get("qLoadMvar")) or 0.0 for item in international)
+    total_load_mw = sum(num(item.get("pMw")) or 0.0 for item in loads) + international_p_mw
     station_member_ids = {generator_id for control in model.get("controls", []) if control.get("kind") == "STATION"
         and control.get("inService") is True for generator_id in control.get("controlledGeneratorIds", [])}
     pv_buses = {item.get("bus") for item in in_service_gens if item.get("controlMode") == "PV"
@@ -303,6 +325,9 @@ def preflight(model, net=None, ids=None, unsupported=None):
     controls = model.get("controls", [])
     station_controls = [item for item in controls if item.get("kind") == "STATION"]
     station_controls_in_service = [item for item in station_controls if item.get("inService") is True]
+    droop_controls = [item for item in station_controls_in_service if item.get("droopEnabled") is True]
+    multi_unit_controls = [item for item in station_controls_in_service if len(item.get("controlledGeneratorIds") or []) > 1]
+    approximate_controls = [item for item in station_controls_in_service if item.get("mappingStatus") == "APPROXIMATE"]
     remote_voltage_controls = [item for item in controls if item.get("controlledBus")]
     reactive_sharing_records = [item for item in station_controls if item.get("reactiveSharingModeCode") is not None or len(item.get("controlledGeneratorIds") or []) > 1]
     droop_records = [item for item in station_controls if item.get("droopEnabled") is True or item.get("droopPercent") is not None or item.get("droopRatedMvar") is not None]
@@ -313,6 +338,7 @@ def preflight(model, net=None, ids=None, unsupported=None):
         count_map("generators", {**ids["gen"], **ids["sgen"]}), count_map("loads", ids["load"]),
         count_map("shunts", ids["shunt"]), count_map("seriesCompensators", ids["impedance"]),
         count_map("externalGrids", ids["ext_grid"]), count_map("switches", ids["switch"]),
+        count_map("internationalConnections", ids["international"]),
     ]
     model_elements_not_mapped = sum(item["notMapped"] for item in not_mapped)
     active_lines = [item for item in model.get("lines", []) if item.get("inService") is True]
@@ -357,7 +383,7 @@ def preflight(model, net=None, ids=None, unsupported=None):
     elm_gen_stat = [item for item in model.get("generators", []) if item.get("inService") is True
         and item.get("sourceRefs", {}).get("powerFactoryClass") == "ElmGenStat"]
     elm_gen_stat_q_coverage = sum(_number(item.get("qMinMvar")) and _number(item.get("qMaxMvar")) for item in elm_gen_stat)
-    applied_station_controls = [item for item in station_controls_in_service if item.get("mappingStatus") == "SOLVED"
+    applied_station_controls = [item for item in station_controls_in_service if item.get("mappingStatus") in ("SOLVED", "APPROXIMATE")
         and item.get("controllerMode") == "VOLTAGE"]
     applied_share_groups = [item for item in applied_station_controls if len(item.get("controlledGeneratorIds") or []) > 1
         and len(item.get("controlledGeneratorShares") or []) == len(item.get("controlledGeneratorIds") or [])]
@@ -372,6 +398,11 @@ def preflight(model, net=None, ids=None, unsupported=None):
         "inServiceBusCount": len(bus_ids), "externalGridCount": ext_count,
         "generationMw": total_gen_mw, "loadMw": total_load_mw,
         "initialPImbalanceMw": total_gen_mw - total_load_mw,
+        "internationalConnectionCount": len(model.get("internationalConnections", [])),
+        "internationalConnectionsInService": sum(item.get("inService") is True for item in model.get("internationalConnections", [])),
+        "internationalConnectionsMapped": len(ids["international"]),
+        "internationalPmw": international_p_mw, "internationalQmvar": international_q_mvar,
+        "internationalMappingMode": "FIXED_PQ_LOAD_APPROXIMATION",
         "pvBusCount": len(pv_buses), "pqBusCount": len(pq_buses), "pvUnitCount": len(pv_units),
         "pvUnitsMissingQLimits": q_missing_pv, "pvUnitsWithQLimits": len(pv_units) - q_missing_pv,
         "pvUnitsWithQLimitsCount": int(pv_with_limits),
@@ -386,6 +417,18 @@ def preflight(model, net=None, ids=None, unsupported=None):
         "unsupportedOrUnsolvedControlCount": unsupported_controls,
         "stationControlCount": len(station_controls), "stationControlsInService": len(station_controls_in_service),
         "remoteVoltageControllerCount": len(remote_voltage_controls), "remoteVoltageControllersApplied": len(applied_station_controls),
+        "stationControllersTotal": len(station_controls), "stationControllersInService": len(station_controls_in_service),
+        "stationControllersApplied": len(applied_station_controls), "stationControllersApproximate": len(approximate_controls),
+        "stationControllersUnsupported": len(station_controls_in_service) - len(applied_station_controls),
+        "multiUnitControllersTotal": len(multi_unit_controls),
+        "multiUnitControllersApplied": sum(item.get("mappingStatus") in ("SOLVED", "APPROXIMATE") for item in multi_unit_controls),
+        "multiUnitControllersApproximate": sum(item.get("mappingStatus") == "APPROXIMATE" for item in multi_unit_controls),
+        "droopControllersTotal": len(droop_controls), "droopControllersApplied": 0,
+        "droopControllersPartial": len(droop_controls),
+        "secondaryControllersTotal": len(model.get("secondaryControllers", [])),
+        "boundariesTotal": len(model.get("boundaries", [])),
+        "activePowerBalancingModeCode": load_flow.get("activePowerBalancingModeCode"),
+        "activePowerBalancingBehavior": "UNKNOWN; raw ComLdf code preserved; no balancing law applied",
         "reactiveSharingRecordCount": len(reactive_sharing_records), "reactiveSharingGroupsApplied": len(applied_share_groups),
         "droopRecordCount": len(droop_records),
         "droopControllersApplied": 0,

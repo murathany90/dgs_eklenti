@@ -186,6 +186,14 @@ async function measureWorkspace(page, flow, startEpochMs) {
   }
   console.log('Large DGS responsive UI', JSON.stringify(report));
   if (!report.readyWithinBudget) throw new Error(`${flow} UI READY exceeded ${readyBudgetMs} ms budget: ${totalReadyMs} ms`);
+  if (flow === 'direct') {
+    const international = await page.evaluate(() => window.YTBS_V3_TEST.graph(window.V6Legacy.getActive()).findings.internationalConnections);
+    if (international.total !== 12 || international.inService !== 8 || international.mapped !== 8 ||
+        Math.abs(international.pLoadMw - 785.98) > 1e-8 || Math.abs(international.qLoadMvar + 137.49) > 1e-8) {
+      throw new Error(`BrowserApprox ElmVac fixed-PQ input regression failed: ${JSON.stringify(international)}`);
+    }
+    console.log('BrowserApprox ElmVac input audit', JSON.stringify(international));
+  }
 }
 
 const failures = [];

@@ -48,7 +48,7 @@ def _controller_groups(model, ids, net):
     for control in model.get("controls", []):
         if control.get("kind") != "STATION" or control.get("inService") is not True:
             continue
-        if control.get("mappingStatus") != "SOLVED" or control.get("controllerMode") != "VOLTAGE" or control.get("droopEnabled") is not False:
+        if control.get("mappingStatus") not in ("SOLVED", "APPROXIMATE") or control.get("controllerMode") != "VOLTAGE" or control.get("droopEnabled") is not False:
             continue
         bus_id = control.get("controlledBus")
         bus_idx = ids["bus"].get(bus_id)
@@ -86,6 +86,8 @@ def _controller_groups(model, ids, net):
             continue
         groups.append({"controllerId": control.get("id"), "busId": bus_id, "busIndex": bus_idx, "targetPu": float(target),
             "generatorIds": list(members), "indices": member_indices, "shares": shares, "qMin": q_min, "qMax": q_max,
+            "distributionMode": control.get("distributionMode", "SOURCE_CVQQ"),
+            "mappingStatus": control.get("mappingStatus", "SOLVED"),
             "history": None, "status": "RUNNING", "voltagePu": None, "errorPu": None})
         seen_buses.add(bus_id); seen_generators.update(members)
     return groups, findings
@@ -97,7 +99,7 @@ def solve_with_controls(net, ids, model, runpp_options, max_outer_iterations):
     if not groups:
         net._ytbs_inner_iterations = []
         return {"converged": True, "outerIterations": 0, "innerIterations": [], "appliedGroups": 0,
-                "qMinHits": 0, "qMaxHits": 0, "pvToPqCount": 0, "unsatisfiedGroups": [],
+                "approximateGroups": 0, "qMinHits": 0, "qMaxHits": 0, "pvToPqCount": 0, "unsatisfiedGroups": [],
                 "mappingFindings": mapping_findings, "voltageTolerancePu": VOLTAGE_TOLERANCE_PU}
 
     inner_iterations, last_error = [], None
@@ -195,10 +197,12 @@ def solve_with_controls(net, ids, model, runpp_options, max_outer_iterations):
     net._ytbs_inner_iterations = inner_iterations
     net._ytbs_outer_iteration = len(inner_iterations)
     return {"converged": converged, "outerIterations": len(inner_iterations), "innerIterations": inner_iterations,
-        "appliedGroups": len(groups), "qMinHits": int(q_min_hits), "qMaxHits": int(q_max_hits),
+        "appliedGroups": len(groups), "approximateGroups": sum(group["mappingStatus"] == "APPROXIMATE" for group in groups),
+        "qMinHits": int(q_min_hits), "qMaxHits": int(q_max_hits),
         "pvToPqCount": 0, "unsatisfiedGroups": unsatisfied, "mappingFindings": mapping_findings,
         "controllers": [{"controllerId": group["controllerId"], "status": group["status"], "targetPu": group["targetPu"],
-            "voltagePu": group["voltagePu"], "errorPu": group["errorPu"], "generatorIds": group["generatorIds"]} for group in groups],
+            "voltagePu": group["voltagePu"], "errorPu": group["errorPu"], "generatorIds": group["generatorIds"],
+            "distributionMode": group["distributionMode"], "mappingStatus": group["mappingStatus"]} for group in groups],
         "voltageTolerancePu": VOLTAGE_TOLERANCE_PU,
         "lastError": str(last_error) if last_error else None,
         "controlledGeneratorIds": sorted(controlled_ids)}

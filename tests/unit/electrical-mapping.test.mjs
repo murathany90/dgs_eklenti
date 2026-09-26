@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mapElectricalNetwork } from '../../src/model/dgs/electrical-network.ts';
+import { computeReactiveParticipation } from '../../src/model/dgs/controls-mapper.ts';
 
 function table(rows) {
   const attributes = [...new Set(rows.flatMap(row => Object.keys(row)))];
@@ -22,6 +23,12 @@ function fixture() {
     ElmShnt: table([{ FID: 'S', bus1: 'C3', ushnm: 10, shtype: 2, qcapn: 2, ncapa: 1, ncapx: 1, iTaps: 0, outserv: 0 }]),
     ElmScap: table([{ FID: 'SC', bus1: 'C1', bus2: 'C2', ucn: 110, bcap: 0.5, outserv: 0 }]),
     ElmXnet: table([{ FID: 'X', bus1: 'C1', usetp: 1, va_degree: 0, outserv: 0 }]),
+    ElmVac: table([{ FID: 'VAC', loc_name: 'International tie', bus1: 'C2', outserv: 0, nphase: 3, usetp: 1,
+      Unom: 110, R1: 5, X1: 20, R2: 5, X2: 20, R0: 10, X0: 30, itype: 2, Pload: 12, Qload: -3 }]),
+    ElmBoundary: table([{ FID: 'BND', loc_name: 'BND', outserv: 0, iInterChg: 1, 'cubicles:SIZEROW': 1, 'cubicles:0': 'C2',
+      'ciorient:SIZEROW': 1, 'ciorient:0': 1, InterPset: 5 }]),
+    ElmSecctrl: table([{ FID: 'AGC', loc_name: 'AGC', outserv: 0, rembar: 'B2', pPmeas: 'BND', psetp: 5, Kpf: 0,
+      imode: 0, 'psym:SIZEROW': 1, 'psym:0': 'X' }]),
     ElmCoup: table([{ FID: 'SW', bus1: 'C1', bus2: 'C2', on_off: 1, outserv: 0 }]),
   };
 }
@@ -62,6 +69,36 @@ test('generator PV/PQ, load and external grid retain source fields', () => {
   assert.equal(net.generators[0].qMaxMvar, 10);
   assert.equal(net.loads[0].pMw, 10);
   assert.equal(net.externalGrids[0].angleDeg, 0);
+});
+test('ElmVac retains source data and signed P/Q through an explicitly approximate PQ interpretation', () => {
+  const item = map(fixture()).internationalConnections[0];
+  assert.equal(item.bus, 'B2');
+  assert.equal(item.sourceType, 2);
+  assert.equal(item.pLoadMw, 12);
+  assert.equal(item.qLoadMvar, -3);
+  assert.equal(item.mappingMode, 'FIXED_PQ_LOAD_APPROXIMATION');
+  assert.equal(item.r1Ohm, 5);
+  assert.equal(item.x0Ohm, 30);
+});
+test('boundary and secondary-control references are preserved independently from balancing behavior', () => {
+  const net = map(fixture());
+  assert.equal(net.boundaries[0].targetActivePowerMw, 5);
+  assert.equal(net.boundaries[0].cubicles[0].bus, 'B2');
+  assert.equal(net.secondaryControllers[0].measuredBoundaryId, 'BND');
+  assert.equal(net.secondaryControllers[0].targetActivePowerMw, 5);
+  assert.deepEqual(net.secondaryControllers[0].participantIds, ['X']);
+  assert.equal(net.secondaryControllers[0].controlledGeneratorIds.length, 0);
+  assert.equal(net.secondaryControllers[0].balancingSupport, 'SOURCE_ONLY');
+});
+test('active-power reactive participation is explicit approximate and rejects nonpositive dispatch', () => {
+  const result = computeReactiveParticipation([
+    { id: 'G1', pMw: 25, inService: true }, { id: 'G2', pMw: 75, inService: true },
+  ], 'ACTIVE_POWER_WEIGHTED_APPROXIMATION');
+  assert.equal(result.status, 'APPROXIMATE');
+  assert.deepEqual(result.weights, [0.25, 0.75]);
+  assert.match(result.reason, /not available to verify/);
+  const unresolved = computeReactiveParticipation([{ id: 'G0', pMw: 0, inService: true }], 'ACTIVE_POWER_WEIGHTED_APPROXIMATION');
+  assert.equal(unresolved.status, 'UNRESOLVED');
 });
 test('TypSym Q limits fill absent ElmSym limits with source finding', () => {
   const doc = fixture();
@@ -176,4 +213,6 @@ test('PV limits, station controller, ComLdf and tapped shunt use verified source
   assert.equal(net.loadFlowSettings.maxNewtonIterations, 100);
   assert.equal(net.loadFlowSettings.maxOuterIterations, 50);
   assert.equal(net.loadFlowSettings.activePowerBalancingMode, 'UNKNOWN');
+  assert.equal(net.loadFlowSettings.rawValues.iPbalancing, 3);
+  assert.equal(net.loadFlowSettings.rawValues.iopt_chctr, null);
 });

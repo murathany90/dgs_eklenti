@@ -1,6 +1,6 @@
 {
   "name": "ytbs-dgs-extension",
-  "version": "6.1.5",
+  "version": "6.1.6",
   "private": true,
   "type": "module",
   "engines": { "node": ">=22" },
@@ -9,6 +9,8 @@
     "lint": "node tools/lint.mjs",
     "test": "node --import tsx --test tests/unit/*.test.mjs",
     "test:integration": "node --import tsx --test tests/integration/*.test.mjs",
+    "audit:fidelity": "node --import tsx tools/model-fidelity-audit.mjs",
+    "study:ac-ablation": "node --import tsx tools/run-ac-ablation.mjs",
     "test:e2e": "node tests/e2e/extension.mjs",
     "test:e2e:states": "node tests/e2e/conflicting-calculation-states.mjs",
     "test:e2e:conflicting-states": "node tests/e2e/conflicting-calculation-states.mjs",

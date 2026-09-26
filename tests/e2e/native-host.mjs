@@ -88,10 +88,22 @@ try {
   if (!health.includes('Protokol: 1.0') || !health.includes('Motor: pandapower') || !health.includes('Sürüm: 3.5.5')) throw Error(`Native health metadata missing: ${health}`);
   await page.evaluate(() => { window.__nativeStart = performance.now(); window.__nativeMilestones = []; window.__nativeProtocolEvents = []; });
   await page.locator('#v61Run').click();
-  await page.waitForFunction(() => {
-    const status = document.querySelector('#v61Status')?.textContent ?? '';
-    return /AC çözümü yakınsamadı|Chrome’a kayıtlı değil|izinli değil|beklenmedik biçimde kapandı|uyumlu değil|zaman aşımına uğradı/.test(status);
-  }, null, { timeout: 600000 });
+  const acWaitMs = Number(process.env.NATIVE_E2E_AC_WAIT_MS ?? 600000);
+  try {
+    await page.waitForFunction(() => {
+      const status = document.querySelector('#v61Status')?.textContent ?? '';
+      return /AC çözümü yakınsamadı|Chrome’a kayıtlı değil|izinli değil|beklenmedik biçimde kapandı|uyumlu değil|zaman aşımına uğradı/.test(status);
+    }, null, { timeout: acWaitMs });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => ({
+      state: Object.fromEntries(['v61Status', 'v61JobState', 'v61HostHealth', 'v61TechnicalError', 'v61CalculationState']
+        .map(id => [id, document.getElementById(id)?.textContent ?? ''])),
+      milestones: window.__nativeMilestones ?? [],
+      protocolEvents: window.__nativeProtocolEvents ?? [],
+    }));
+    console.error(`Native host AC did not return a terminal status within ${acWaitMs} ms: ${JSON.stringify(diagnostics)}`);
+    throw error;
+  }
   const acStatus = await page.locator('#v61Status').innerText();
   if (!acStatus.includes('AC çözümü yakınsamadı')) throw Error(`Native host AC did not return a non-converged AC result: ${acStatus}`);
   const acSummary = await page.locator('#v61NonConvergence').innerText();

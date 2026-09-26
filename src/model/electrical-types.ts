@@ -35,6 +35,22 @@ export interface CanonicalShunt extends ElectricalBase {
 }
 export interface CanonicalSeriesCompensator extends ElectricalBase { fromBus: string | null; toBus: string | null; nominalKv: number | null; susceptanceSiemens: number | null; xOhm: number | null }
 export interface CanonicalExternalGrid extends ElectricalBase { bus: string | null; vmPu: number | null; angleDeg: number | null; pMinMw: number | null; pMaxMw: number | null; qMinMvar: number | null; qMaxMvar: number | null }
+export interface CanonicalInternationalConnection extends ElectricalBase {
+  bus: string | null; nominalKv: number | null; voltageSetpointPu: number | null;
+  r1Ohm: number | null; x1Ohm: number | null; r2Ohm: number | null; x2Ohm: number | null; r0Ohm: number | null; x0Ohm: number | null;
+  sourceType: number | null; pLoadMw: number | null; qLoadMvar: number | null;
+  /** DGS Pload/Qload represented as a fixed-PQ load; ElmVac electrical-source behavior is not reproduced. */
+  mappingMode: 'FIXED_PQ_LOAD_APPROXIMATION' | 'SOURCE_ONLY';
+}
+export interface CanonicalBoundaryCubicle { reference: string; bus: string | null; orientation: number | null }
+export interface CanonicalBoundary extends ElectricalBase {
+  cubicles: CanonicalBoundaryCubicle[]; interchangeEnabled: boolean | null; targetActivePowerMw: number | null;
+}
+export interface CanonicalSecondaryController extends ElectricalBase {
+  referenceBus: string | null; measuredBoundaryId: string | null; measuredBoundaryRaw: string | null;
+  targetActivePowerMw: number | null; frequencyBias: number | null; distributionModeCode: number | null;
+  participantIds: string[]; controlledGeneratorIds: string[]; balancingSupport: 'SOURCE_ONLY';
+}
 export interface CanonicalSwitch extends ElectricalBase { fromBus: string | null; toBus: string | null; closed: boolean; usage: string | null }
 export interface CanonicalControl {
   id: string; kind: 'VOLTAGE' | 'TAP' | 'SHUNT' | 'STATION'; targetId: string;
@@ -44,14 +60,16 @@ export interface CanonicalControl {
   selectedBusModeCode?: number | null; droopEnabled?: boolean | null; droopRatedMvar?: number | null;
   droopPercent?: number | null; droopRawValue?: number | null; droopRatedRaw?: number | null;
   controllerMode?: 'VOLTAGE' | 'REACTIVE_POWER' | 'POWER_FACTOR' | 'TAN_PHI' | 'UNKNOWN';
-  mappingStatus?: 'SOLVED' | 'MAPPED_BUT_NOT_SOLVED' | 'SOURCE_ONLY'; support: Support;
+  mappingStatus?: 'SOLVED' | 'APPROXIMATE' | 'MAPPED_BUT_NOT_SOLVED' | 'SOURCE_ONLY';
+  distributionMode?: 'SINGLE_UNIT' | 'SOURCE_CVQQ' | 'ACTIVE_POWER_WEIGHTED_APPROXIMATION' | 'UNRESOLVED';
+  support: Support;
 }
 export interface CanonicalLoadFlowSettings {
   sourceRefs: SourceRefs;
   enforceReactiveLimits: boolean | null; maxNewtonIterations: number | null; maxOuterIterations: number | null;
   nodalToleranceRaw: number | null; modelEquationToleranceRaw: number | null;
   activePowerBalancingModeCode: number | null; activePowerBalancingMode: 'UNKNOWN';
-  rawValues: Record<'iopt_lim' | 'itrlx' | 'ictrlx' | 'errlf' | 'erreq' | 'iPbalancing', number | null>;
+  rawValues: Record<'iopt_lim' | 'itrlx' | 'ictrlx' | 'errlf' | 'erreq' | 'iPbalancing' | 'iopt_chctr' | 'iShowOutLoopMsg' | 'iopt_initOPF' | 'iItAlgStag' | 'iInterChg' | 'iInterType', number | null>;
 }
 export interface ModelCoverage { available: number; total: number; percent: number | null; status: Support; note?: string }
 export interface ElectricalCanonicalNetwork {
@@ -59,7 +77,8 @@ export interface ElectricalCanonicalNetwork {
   buses: CanonicalBus[]; lines: CanonicalLine[]; transformers: CanonicalTransformer[];
   generators: CanonicalGenerator[]; loads: CanonicalLoad[]; shunts: CanonicalShunt[];
   seriesCompensators: CanonicalSeriesCompensator[]; externalGrids: CanonicalExternalGrid[];
-  switches: CanonicalSwitch[]; controls: CanonicalControl[]; loadFlowSettings: CanonicalLoadFlowSettings;
+  switches: CanonicalSwitch[]; controls: CanonicalControl[]; internationalConnections: CanonicalInternationalConnection[];
+  secondaryControllers: CanonicalSecondaryController[]; boundaries: CanonicalBoundary[]; loadFlowSettings: CanonicalLoadFlowSettings;
   findings: MappingFinding[]; findingCounts: Record<string, number>;
   engineCapabilities: Record<string, Support>; modelCoverage: Record<string, ModelCoverage>;
 }
