@@ -965,8 +965,9 @@ async function checkNativeHealth(): Promise<void> {
     if (generation !== healthGeneration) return;
     const okay = health.status === 'CONNECTED';
     analysisState.hostState = okay ? 'CONNECTED' : 'ERROR';
-    const statusLabels = { CONNECTED: 'Bağlı', PROTOCOL_MISMATCH: 'Protokol sürümü uyumsuz', ENGINE_MISMATCH: 'Hesap motoru uyumsuz', ENGINE_VERSION_MISMATCH: 'Hesap motoru sürümü uyumsuz' } as const;
-    status.textContent = `Grid Analyzer Yerel Hesap Motoru · Yerel hesap motoru: ${okay ? 'BAĞLI' : 'HATA'} · ${statusLabels[health.status]} · Protokol: ${health.protocolVersion} · Motor: ${health.engine} · Sürüm: ${health.engineVersion} · Extension ID: ${health.extensionId} · Bağlantı: ${Math.round(performance.now() - startedClock)} ms`;
+    const statusLabels = { CONNECTED: '', PROTOCOL_MISMATCH: 'Protokol sürümü uyumsuz', ENGINE_MISMATCH: 'Hesap motoru uyumsuz', ENGINE_VERSION_MISMATCH: 'Hesap motoru sürümü uyumsuz' } as const;
+    const detail = statusLabels[health.status] ? ` · ${statusLabels[health.status]}` : '';
+    status.textContent = `Grid Analyzer Yerel Hesap Motoru · Yerel hesap motoru: ${okay ? 'BAĞLI' : 'HATA'}${detail} · Protokol: ${health.protocolVersion} · Motor: ${health.engine} · Sürüm: ${health.engineVersion} · Extension ID: ${health.extensionId} · Bağlantı: ${Math.round(performance.now() - startedClock)} ms`;
     status.className = `notice ${okay ? '' : 'bad'}`;
     if (okay) { lastNativeHostError = null; solverPanel.querySelector<HTMLElement>('#v61HostActions')!.hidden = true; }
     solverPanel.querySelector<HTMLElement>('#v61InstallationHelp')!.hidden = true;
@@ -1086,7 +1087,13 @@ window.V6Bridge = {
   },
 };
 
-for (const id of ['v54GoAnalysis', 'runSolver']) document.querySelector(`#${id}`)?.addEventListener('click', () => navigate('analysis'));
+const legacyExperimentalRun = document.querySelector<HTMLButtonElement>('#runSolver');
+if (legacyExperimentalRun) {
+  const legacyRunRow = legacyExperimentalRun.closest<HTMLElement>('.row');
+  if (legacyRunRow) legacyRunRow.hidden = true;
+  legacyExperimentalRun.disabled = true;
+}
+document.querySelector('#v54GoAnalysis')?.addEventListener('click', () => navigate('analysis'));
 document.querySelector('#v54GoScenario')?.addEventListener('click', () => navigate('scenario'));
 
 document.title = 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.4';

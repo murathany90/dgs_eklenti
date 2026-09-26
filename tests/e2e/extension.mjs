@@ -86,6 +86,11 @@ try {
   }
 
   await page.locator('#primaryTabs [data-primary="map"]').click();
+  if (await page.getByRole('button', { name: 'Deneysel hesap' }).count()) throw Error('Legacy experimental calculation button is visible on the map');
+  const mapEngineStatus = await page.locator('#v54State').innerText();
+  if (!mapEngineStatus.includes('Tarayıcı Yaklaşık Çözüm') || mapEngineStatus === 'Deneysel hesap') throw Error(`Map solver status lacks clear engine provenance: ${mapEngineStatus}`);
+  const flowStatus = await page.locator('#v55FlowStatus').innerText();
+  if (!flowStatus.startsWith('Akış animasyonu: ')) throw Error(`Flow animation status is ambiguous: ${flowStatus}`);
   if (process.env.DGS_E2E_MODEL) {
     await page.evaluate(() => selectLine('H5846'));
     const selected = await page.locator('#mapSelection').innerText();

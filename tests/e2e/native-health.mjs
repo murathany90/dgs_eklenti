@@ -63,6 +63,7 @@ try {
   }, null, { timeout: 65000 });
   const health = await page.locator('#v61HostHealth').innerText();
   if (!health.includes('Motor: pandapower') || !health.includes('Sürüm: 3.5.5')) throw Error(`UI health failed: ${health}`);
+  if (health.toLocaleLowerCase('tr-TR').split('bağlı').length - 1 !== 1) throw Error(`UI health repeats its connected state: ${health}`);
   console.log(JSON.stringify({ extensionId: id, helloResponseMs, protocolVersion: native.protocolVersion,
     engine: native.engine, engineVersion: native.engineVersion, uiHealth: health }, null, 2));
 } finally {
