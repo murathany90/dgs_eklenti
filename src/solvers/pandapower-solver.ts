@@ -8,7 +8,7 @@ const CHUNK = 128 * 1024;
 interface Message { type: string; protocolVersion: string; requestId: string; jobId: string; [key: string]: unknown }
 interface Port { postMessage: (message: Message) => void; disconnect: () => void; onMessage: { addListener: (listener: (message: Message) => void) => void }; onDisconnect: { addListener: (listener: () => void) => void } }
 declare const chrome: { runtime: { id?: string; connectNative: (name: string) => Port; lastError?: { message: string } } };
-export type NativeHostErrorKind = 'HOST_NOT_REGISTERED' | 'HOST_ORIGIN_MISMATCH' | 'HOST_START_FAILED' | 'HOST_DISCONNECTED' | 'HOST_CRASHED' | 'PROTOCOL_ERROR' | 'SOLVER_ERROR' | 'TIMEOUT';
+export type NativeHostErrorKind = 'HOST_NOT_REGISTERED' | 'HOST_ORIGIN_MISMATCH' | 'HOST_START_FAILED' | 'HOST_START_TIMEOUT' | 'HELLO_TIMEOUT' | 'CAPABILITIES_TIMEOUT' | 'HOST_DISCONNECTED' | 'HOST_CRASHED' | 'PROTOCOL_ERROR' | 'PANDAPOWER_IMPORT_ERROR' | 'SOLVER_ERROR' | 'TIMEOUT';
 export interface NativeHostHealth { status: 'CONNECTED' | 'PROTOCOL_MISMATCH' | 'ENGINE_MISMATCH' | 'ENGINE_VERSION_MISMATCH'; protocolVersion: string; engine: string; engineVersion: string; extensionId: string }
 
 function base64(bytes: Uint8Array): string {
@@ -30,6 +30,7 @@ export function classifyDisconnect(message: string, connected: boolean): NativeH
   return connected ? 'HOST_DISCONNECTED' : 'HOST_START_FAILED';
 }
 export function classifyHostResponse(code: string): NativeHostErrorKind {
+  if (code === 'PANDAPOWER_IMPORT_ERROR') return 'PANDAPOWER_IMPORT_ERROR';
   if (/PROTOCOL|VERSION|UNKNOWN_COMMAND/.test(code)) return 'PROTOCOL_ERROR';
   if (code === 'HOST_ERROR') return 'SOLVER_ERROR';
   return 'PROTOCOL_ERROR';
@@ -39,7 +40,9 @@ export function classifyConnectionError(message: string): NativeHostErrorKind { 
 export class PandapowerSolver implements PowerSystemSolver {
   readonly id = 'pandapower';
   readonly capabilities = { ac: true, dc: true, fullNetwork: true, scenarios: false };
-  async healthCheck(timeoutMs = 3000): Promise<NativeHostHealth> {
+  async healthCheck(timeoutMs?: number): Promise<NativeHostHealth> {
+    const startupTimeoutMs = timeoutMs ?? 15000;
+    const capabilitiesTimeoutMs = timeoutMs ?? 30000;
     let port: Port;
     try { port = chrome.runtime.connectNative(HOST); }
     catch (error) { const message = error instanceof Error ? error.message : String(error); throw new NativeHostError(classifyConnectionError(message), message); }
@@ -48,9 +51,27 @@ export class PandapowerSolver implements PowerSystemSolver {
       const capabilities = await new Promise<Message>((resolve, reject) => {
         let settled = false;
         const finish = (callback: () => void): void => { if (settled) return; settled = true; clearTimeout(timer); callback(); };
-        const timer = setTimeout(() => finish(() => reject(new NativeHostError('TIMEOUT', 'Native host health check timed out'))), timeoutMs);
+        let stage: 'HOST_START_TIMEOUT' | 'HELLO_TIMEOUT' | 'CAPABILITIES_TIMEOUT' = 'HOST_START_TIMEOUT';
+        let timer: ReturnType<typeof setTimeout>;
+        const waitFor = (nextStage: typeof stage): void => {
+          stage = nextStage;
+          clearTimeout(timer);
+          const budgetMs = stage === 'CAPABILITIES_TIMEOUT' ? capabilitiesTimeoutMs : startupTimeoutMs;
+          timer = setTimeout(() => finish(() => reject(new NativeHostError(stage, `${stage} after ${budgetMs} ms`))), budgetMs);
+        };
+        waitFor('HOST_START_TIMEOUT');
         port.onMessage.addListener(message => {
+          if (message.type === 'HOST_STARTED') {
+            if (message.protocolVersion !== VERSION) return finish(() => reject(new NativeHostError('PROTOCOL_ERROR', `Native host protocol version mismatch: ${String(message.protocolVersion)}`)));
+            if (stage === 'HOST_START_TIMEOUT') waitFor('HELLO_TIMEOUT');
+            return;
+          }
           if (message.requestId !== requestId || message.jobId !== jobId) return;
+          if (message.type === 'HELLO_ACK') {
+            if (message.protocolVersion !== VERSION) return finish(() => reject(new NativeHostError('PROTOCOL_ERROR', `Native host protocol version mismatch: ${String(message.protocolVersion)}`)));
+            if (stage !== 'CAPABILITIES_TIMEOUT') waitFor('CAPABILITIES_TIMEOUT');
+            return;
+          }
           if (message.type === 'CAPABILITIES') return finish(() => resolve(message));
           if (message.type === 'ERROR') return finish(() => reject(new NativeHostError(classifyHostResponse(String(message.code ?? '')), `${String(message.code ?? '')}: ${String(message.message ?? '')}`)));
           if (message.protocolVersion !== VERSION) return finish(() => reject(new NativeHostError('PROTOCOL_ERROR', `Native host protocol version mismatch: ${String(message.protocolVersion)}`)));
@@ -84,7 +105,13 @@ export class PandapowerSolver implements PowerSystemSolver {
     let wake: ((message: Message) => void) | null = null;
     let disconnected: NativeHostError | null = null;
     let connected = false;
+    let handshaking = true;
+    let handshakeStage: 'HOST_START_TIMEOUT' | 'HELLO_TIMEOUT' | 'CAPABILITIES_TIMEOUT' = 'HOST_START_TIMEOUT';
     port.onMessage.addListener(message => {
+      if (message.type === 'HOST_STARTED') {
+        if (!handshaking) return;
+        message = { ...message, requestId, jobId };
+      }
       if (message.requestId !== requestId || message.jobId !== jobId) return;
       if (message.protocolVersion !== VERSION) {
         disconnected = new NativeHostError('PROTOCOL_ERROR', `Native host protocol version mismatch: ${String(message.protocolVersion)}`);
@@ -92,6 +119,8 @@ export class PandapowerSolver implements PowerSystemSolver {
         return;
       }
       connected = true;
+      if (message.type === 'HOST_STARTED') handshakeStage = 'HELLO_TIMEOUT';
+      if (message.type === 'HELLO_ACK') handshakeStage = 'CAPABILITIES_TIMEOUT';
       if (wake) { const resolve = wake; wake = null; resolve(message); } else pending.push(message);
     });
     port.onDisconnect.addListener(() => {
@@ -100,17 +129,18 @@ export class PandapowerSolver implements PowerSystemSolver {
       if (wake) { const resolve = wake; wake = null; resolve({ type: 'DISCONNECTED', protocolVersion: VERSION, requestId, jobId }); }
     });
     const send = (type: string, fields: Record<string, unknown> = {}): void => port.postMessage({ type, protocolVersion: VERSION, requestId, jobId, ...fields });
-    const next = (): Promise<Message> => {
+    const next = (timeoutMs: number, handshake: boolean): Promise<Message> => {
       if (pending.length) return Promise.resolve(pending.shift()!);
       if (disconnected) return Promise.reject(disconnected);
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => { wake = null; reject(new NativeHostError('TIMEOUT', 'Native host response timeout')); }, 300000);
+        const budgetMs = handshake && handshakeStage === 'CAPABILITIES_TIMEOUT' ? 30000 : timeoutMs;
+        const timer = setTimeout(() => { wake = null; reject(new NativeHostError(handshake ? handshakeStage : 'TIMEOUT', `Native host response timeout after ${budgetMs} ms`)); }, budgetMs);
         wake = message => { clearTimeout(timer); resolve(message); };
       });
     };
-    const expect = async (type: string): Promise<Message> => {
+    const expect = async (type: string, timeoutMs = 300000): Promise<Message> => {
       for (;;) {
-        const message = await next();
+        const message = await next(timeoutMs, type === 'CAPABILITIES');
         if (message.type === 'DISCONNECTED') throw disconnected ?? new NativeHostError('HOST_DISCONNECTED', 'Native host connection closed');
         if (message.type === 'ERROR') {
           const code = String(message.code ?? '');
@@ -122,7 +152,8 @@ export class PandapowerSolver implements PowerSystemSolver {
     };
     try {
       send('HELLO');
-      await expect('CAPABILITIES');
+      await expect('CAPABILITIES', 15000);
+      handshaking = false;
       onProgress?.('TRANSFERRING');
       const payload = new TextEncoder().encode(JSON.stringify(network.electrical));
       const sha256 = hex(await crypto.subtle.digest('SHA-256', payload));

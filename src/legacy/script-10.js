@@ -11,8 +11,8 @@
  function syncGroups(){for(const [key] of Object.entries(GROUPS)){const b=E('v54g'+key);if(!b)continue;const st=stateOf(key);b.classList.toggle('active',st==='on');b.classList.toggle('mixed',st==='mixed');b.setAttribute('aria-pressed',String(st==='on'));b.title=key==='mid'?'66 / 154 / 220 kV; nominal değerler korunur':key==='low'?'36 kV ve altındaki model seviyeleri':'400 kV';b.disabled=st==='none';}
   all('.v54Metric').forEach(b=>b.classList.toggle('active',b.dataset.metric===E('mapMetric').value));
   all('.v54Mode').forEach(b=>b.classList.toggle('active',b.dataset.view===ScenarioController.viewMode));
-  const st=E('v54State');if(st){const n=v4.overrides.size+v42.switchOverrides.size;st.textContent=v3.running?'Hesaplanıyor':ScenarioController.pending?'Hesap bekliyor':n?(v4.scenario?'Deneysel senaryo':'Senaryo sonucu yok'):'Deneysel hesap';}
-  const q=E('v54Quality');if(q){const sum=(v3.solver?.summary||v4.baseSolver?.summary||[]);q.textContent=sum.some(x=>x.nrFallback)?'⚠ Newton yakınsamadı · yaklaşık AC':sum.some(x=>x.status==='CONVERGED_NR_EXPERIMENTAL')?'⚠ Deneysel Newton · bağımsız doğrulama yok':'⚠ Deneysel sonuç · bağımsız doğrulama yok';}
+  const st=E('v54State');if(st){const n=v4.overrides.size+v42.switchOverrides.size;st.textContent=v3.running?'Tarayıcı Yaklaşık Çözüm · hesaplanıyor':ScenarioController.pending?'Tarayıcı Yaklaşık Çözüm · senaryo hesaplanıyor':n?(v4.scenario?'Tarayıcı Yaklaşık Çözüm · senaryo sonucu':'Senaryo sonucu yok'):'Tarayıcı Yaklaşık Çözüm';}
+  const q=E('v54Quality');if(q){const sum=(v3.solver?.summary||v4.baseSolver?.summary||[]);q.textContent=sum.some(x=>x.nrFallback)?'⚠ Tarayıcı Yaklaşık Çözüm · Newton yakınsamadı':sum.some(x=>x.status==='CONVERGED_NR_EXPERIMENTAL')?'⚠ Tarayıcı Yaklaşık Çözüm · bağımsız PowerFactory doğrulaması yok':'⚠ Tarayıcı Yaklaşık Çözüm · sonuç yok';}
  }
  function redraw(){syncGroups();if(currentView==='map')drawMap();try{v42RenderLightning();}catch(_){}}
  function applyGroup(key){const ls=groupInputs(key),on=!ls.length?false:ls.some(e=>!e.checked);if(key==='low'&&E('v43Le36')){const g=E('v43Le36');g.checked=on;g.dispatchEvent(new Event('change',{bubbles:true}));}else{for(const e of ls){if(e.checked===on)continue;e.checked=on;e.dispatchEvent(new Event('change',{bubbles:true}));}}redraw();}
@@ -26,6 +26,7 @@
  window.v54ClearMapSelection=clearSelection;
  function compactLine(){const l=validLine(),d=E('v43Drawer');if(!l||!d)return;
   let el=E('v54CompactLine');if(!el){el=document.createElement('div');el.id='v54CompactLine';d.querySelector('#v43Body').before(el);}
+  if(window.YTBS_ActiveMapResult?.selectionHtml){el.innerHTML=window.YTBS_ActiveMapResult.selectionHtml('line',l.FID);return;}
   const stale=ScenarioController.pending&&ScenarioController.viewMode!=='reference';
   const get=(m)=>stale?null:latestResult('ElmLne',l.FID,m,'from');
   const p=get('P'),q=get('Q'),c=window.YTBS_V53_TEST?.line(l.FID),ld=stale?null:window.YTBS_V53_TEST?.loading(l.FID);

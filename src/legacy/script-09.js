@@ -65,7 +65,7 @@ function loadingFromSet(set,line,season){if(!active||!line||!set||set.modelId!==
  }
  return max;
 }
-function loading(line,season){if(!active||!line||v4LineOut(line))return null;let set=resultSet();if(!set)return null;return loadingFromSet(set,line,season);}
+function loading(line,season){if(!active||!line||v4LineOut(line))return null;let set=mapResultSet();if(!set)return null;return loadingFromSet(set,line,season);}
 window.LineCapacityEngine={get:capFor,capacityLimit,loadingFromSet,loading,build:setup,report:()=>{setup();return state.modelReport;},embeddedSize:Object.keys(EMBEDDED).length};
 window.YTBS_V53={stationVisible,transformerVisible,isTerminalRestored,refreshRestoredEnds};
 window.v4Loading=loading; // One capacity and current engine for map, lightning, SLD and analysis.
@@ -73,8 +73,9 @@ window.v4Loading=loading; // One capacity and current engine for map, lightning,
 // Expose the same solved-current-based value there; never invent a loading row when absent.
 const previousLatestResult=window.latestResult;
 window.latestResult=function(cls,id,metric,terminal=null){
+ if(window.YTBS_ActiveMapResult)return previousLatestResult(cls,id,metric,terminal);
  if(cls==='ElmLne'&&metric==='loading'){
-  const line=active?.lineById(id),set=resultSet();
+  const line=active?.lineById(id),set=mapResultSet();
   if(!line||!set)return null;
   if(v4LineOut(line)&&set===v4.scenario)return null;
   const o=loadingFromSet(set,line,$53('v4Season')?.value||'nominal');

@@ -55,9 +55,9 @@ try {
   await page.locator('#v6Validation').waitFor({ timeout: 120000 });
   if (process.env.DGS_E2E_MODEL) await page.waitForFunction(name => document.querySelector('#v6Validation')?.dataset.modelName === name, basename(process.env.DGS_E2E_MODEL), { timeout: 120000 });
   await page.waitForFunction(() => !!document.querySelector('#v6Metadata')?.dataset.components, null, { timeout: 120000 });
-  if (await page.title() !== 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.3') throw Error(`Workspace title branding mismatch: ${await page.title()}`);
+  if (await page.title() !== 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.4') throw Error(`Workspace title branding mismatch: ${await page.title()}`);
   if (await page.locator('.apphead h1').innerText() !== 'Grid Analyzer' || await page.locator('.brand small').innerText() !== 'Şebeke Analiz Sistemi') throw Error('Workspace header branding missing');
-  if (!(await page.locator('#footerRight').innerText()).includes('Grid Analyzer · Chrome MV3 · v6.1.3')) throw Error('Workspace footer branding missing');
+  if (!(await page.locator('#footerRight').innerText()).includes('Grid Analyzer · Chrome MV3 · v6.1.4')) throw Error('Workspace footer branding missing');
   const visibleBrandText = await page.locator('body').innerText();
   for (const oldName of ['YTBS Şebeke Analiz ve Görüntüleme', 'YTBS Şebeke Görüntüleyici', 'PowerFactory Şebeke Görüntüleyici ve Analiz Sistemi']) {
     if (visibleBrandText.includes(oldName)) throw Error(`Old product branding remains visible: ${oldName}`);
@@ -86,6 +86,11 @@ try {
   }
 
   await page.locator('#primaryTabs [data-primary="map"]').click();
+  if (await page.getByRole('button', { name: 'Deneysel hesap' }).count()) throw Error('Legacy experimental calculation button is visible on the map');
+  const mapEngineStatus = await page.locator('#v54State').innerText();
+  if (!mapEngineStatus.includes('Tarayıcı Yaklaşık Çözüm') || mapEngineStatus === 'Deneysel hesap') throw Error(`Map solver status lacks clear engine provenance: ${mapEngineStatus}`);
+  const flowStatus = await page.locator('#v55FlowStatus').innerText();
+  if (!flowStatus.startsWith('Akış animasyonu: ')) throw Error(`Flow animation status is ambiguous: ${flowStatus}`);
   if (process.env.DGS_E2E_MODEL) {
     await page.evaluate(() => selectLine('H5846'));
     const selected = await page.locator('#mapSelection').innerText();
@@ -123,12 +128,12 @@ try {
   await page.waitForFunction(() => !window.YTBS_AnalysisState?.activeResult || window.YTBS_AnalysisState.activeResult.summary.mode === 'AC');
   if (await page.evaluate(() => window.YTBS_AnalysisState?.activeResult?.summary.mode === 'DC')) throw Error('DC result leaked into selected AC mode');
   await page.locator('#v61HostHealthButton').click();
-  await page.waitForFunction(() => /Grid Analyzer Yerel Hesap Motoru/.test(document.querySelector('#v61HostHealth')?.textContent ?? ''), null, { timeout: 15000 });
+  await page.waitForFunction(() => ['CONNECTED', 'DISCONNECTED', 'TIMEOUT', 'ERROR'].includes(window.YTBS_AnalysisState?.hostState), null, { timeout: 65000 });
   await snap('06-host-health.png');
   await page.locator('#v61Mode').selectOption('DC');
   await page.locator('#v61Run').click();
   const healthStatus = await page.locator('#v61HostHealth').innerText();
-  const nativeReady = process.env.YTBS_E2E_INSTALL_NATIVE_HOST === '1' || process.env.YTBS_E2E_NATIVE_AVAILABLE === '1' || healthStatus.includes('· Bağlı ·');
+  const nativeReady = !!process.env.DGS_E2E_MODEL && (process.env.YTBS_E2E_INSTALL_NATIVE_HOST === '1' || process.env.YTBS_E2E_NATIVE_AVAILABLE === '1' || healthStatus.includes('Yerel hesap motoru: BAĞLI'));
   if (nativeReady) {
     await page.waitForFunction(() => /DC yük akışı yakınsadı\./.test(document.querySelector('#v61Status')?.textContent ?? ''), null, { timeout: 600000 });
     const diagnostic = await page.locator('#v61Preflight').innerText();
@@ -142,10 +147,18 @@ try {
     await checkTerminology('DC result');
     await snap('10-result-unavailable-reason.png');
   } else {
-    await page.waitForFunction(() => /Grid Analyzer Yerel Hesap Motoru (?:Chrome’a kayıtlı değil|bu Chrome Extension ID için izinli değil|başlatılamadı)/.test(document.querySelector('#v61Status')?.textContent ?? ''), null, { timeout: 30000 });
-    await page.locator('#v61HostActions').getByText('Kurulum Yardımı').waitFor();
-    if (!(await page.locator('#v61InstallCommand').innerText()).includes(id)) throw Error('Windows install command does not contain this runtime extension ID');
-    console.log('Native host E2E SKIP: local host not installed; UI install guidance verified.');
+    await page.waitForFunction(() => window.YTBS_AnalysisState?.calculationJob?.state === 'FAILED' && /(?:kayıtlı değil|izinli değil|başlatılamadı|bağlantısı kesildi|hata verdi|zaman aşımına uğradı)/.test(document.querySelector('#v61Status')?.textContent ?? ''), null, { timeout: 30000 });
+    const calculationStatus = await page.locator('#v61Status').innerText();
+    if (calculationStatus.includes('Yerel çözücü hesap sırasında hata verdi')) {
+      if (!(await page.locator('#v61HostHealth').innerText()).includes('Yerel hesap motoru: BAĞLI')) throw Error('Responding host was marked disconnected after solver failure');
+      if (!(await page.locator('#v61TechnicalError').innerText()).includes('HOST_ERROR')) throw Error('Native solver failure lost its technical code');
+      console.log('Native host returned a solver error for the smoke model; connection and state separation verified.');
+    } else {
+      if (!(await page.locator('#v61HostHealth').innerText()).includes('Yerel hesap motoru: BAĞLANTI YOK')) throw Error('Native host connection failure was not separated from calculation status');
+      await page.locator('#v61HostActions').getByText('Kurulum Yardımı').waitFor();
+      if (!(await page.locator('#v61InstallCommand').innerText()).includes(id)) throw Error('Windows install command does not contain this runtime extension ID');
+      console.log('Native host E2E SKIP: local host not installed; UI install guidance verified.');
+    }
   }
   await page.locator('#v61Mode').selectOption('AC');
   await page.waitForFunction(() => !window.YTBS_AnalysisState?.activeResult || window.YTBS_AnalysisState.activeResult.summary.mode === 'AC');
@@ -300,11 +313,17 @@ try {
 
   await page.setViewportSize({ width: 1280, height: 720 });
   const width = await page.evaluate(() => document.documentElement.scrollWidth);
-  if (width > 1280) throw Error(`Responsive horizontal overflow: ${width}px at 1280px viewport`);
+  if (width > 1280) {
+    const overflowing = await page.evaluate(() => [...document.querySelectorAll('body *')].filter(element => {
+      const rect = element.getBoundingClientRect(); return rect.width > 0 && rect.right > 1280;
+    }).slice(0, 12).map(element => ({ tag: element.tagName, id: element.id, className: element.className,
+      text: element.textContent?.slice(0, 100), right: element.getBoundingClientRect().right })));
+    throw Error(`Responsive horizontal overflow: ${width}px at 1280px viewport: ${JSON.stringify(overflowing)}`);
+  }
   await page.screenshot({ path: join(screenshots, 'responsive-1280x720.png'), animations: 'disabled' });
   if (errors.length) throw Error(`Page errors: ${errors.join(' | ')}`);
   const manifest = JSON.parse(await readFile('dist/manifest.json', 'utf8'));
-  if (manifest.manifest_version !== 3 || manifest.version !== '6.1.3' || manifest.name !== 'Grid Analyzer - Şebeke Analiz Sistemi' || manifest.icons?.['16'] !== 'assets/icons/ga-16.png') throw Error('Manifest V3 / v6.1.3 branding mismatch');
+  if (manifest.manifest_version !== 3 || manifest.version !== '6.1.4' || manifest.name !== 'Grid Analyzer - Şebeke Analiz Sistemi' || manifest.icons?.['16'] !== 'assets/icons/ga-16.png') throw Error('Manifest V3 / v6.1.4 branding mismatch');
   for (const size of [16, 32, 48, 128]) {
     const png = await readFile(resolve(`dist/assets/icons/ga-${size}.png`));
     if (png.readUInt32BE(16) !== size || png.readUInt32BE(20) !== size) throw Error(`Packaged ga-${size}.png has incorrect dimensions`);

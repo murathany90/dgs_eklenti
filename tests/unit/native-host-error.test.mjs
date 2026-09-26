@@ -12,6 +12,7 @@ test('Chrome native host errors remain specific', () => {
   assert.equal(classifyHostResponse('PROTOCOL_VERSION'), 'PROTOCOL_ERROR');
   assert.equal(classifyHostResponse('UNKNOWN_COMMAND'), 'PROTOCOL_ERROR');
   assert.equal(classifyHostResponse('HOST_ERROR'), 'SOLVER_ERROR');
+  assert.equal(classifyHostResponse('PANDAPOWER_IMPORT_ERROR'), 'PANDAPOWER_IMPORT_ERROR');
   assert.equal(new NativeHostError('TIMEOUT', 'test').kind, 'TIMEOUT');
 });
 
@@ -35,6 +36,29 @@ test('health check exchanges HELLO for capabilities and reports engine version',
     assert.equal((await new PandapowerSolver().healthCheck()).status, 'ENGINE_MISMATCH');
     install('3.5.5', { protocolVersion: '2.0' });
     assert.equal((await new PandapowerSolver().healthCheck()).status, 'PROTOCOL_MISMATCH');
+  } finally {
+    if (previous === undefined) delete globalThis.chrome; else globalThis.chrome = previous;
+  }
+});
+
+test('health check identifies the stage that timed out', async () => {
+  const previous = globalThis.chrome;
+  try {
+    for (const [messages, expected] of [
+      [[], 'HOST_START_TIMEOUT'],
+      [[{ type: 'HOST_STARTED' }], 'HELLO_TIMEOUT'],
+      [[{ type: 'HOST_STARTED' }, { type: 'HELLO_ACK' }], 'CAPABILITIES_TIMEOUT'],
+    ]) {
+      let listener;
+      globalThis.chrome = { runtime: { connectNative: () => ({
+        postMessage: message => queueMicrotask(() => {
+          for (const response of messages) listener({ protocolVersion: '1.0', requestId: message.requestId,
+            jobId: message.jobId, ...response });
+        }),
+        disconnect: () => {}, onMessage: { addListener: fn => { listener = fn; } }, onDisconnect: { addListener: () => {} },
+      }) } };
+      await assert.rejects(new PandapowerSolver().healthCheck(20), error => error instanceof NativeHostError && error.kind === expected);
+    }
   } finally {
     if (previous === undefined) delete globalThis.chrome; else globalThis.chrome = previous;
   }

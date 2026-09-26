@@ -18,7 +18,7 @@ $payload = [ordered]@{
   type = 'stdio'
   allowed_origins = @("chrome-extension://$ExtensionId/")
 }
-[System.IO.File]::WriteAllText($manifest, ($payload | ConvertTo-Json -Depth 3), [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText($manifest, ($payload | ConvertTo-Json -Depth 3), [System.Text.UTF8Encoding]::new($false))
 $registryPath = 'HKCU:\Software\Google\Chrome\NativeMessagingHosts\com.ytbs.powerfactory.solver'
 New-Item -Path $registryPath -Force | Out-Null
 Set-Item -Path $registryPath -Value $manifest

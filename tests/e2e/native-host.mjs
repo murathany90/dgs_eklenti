@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 
 if (process.platform !== 'win32') { console.log('Native Chrome host E2E SKIP: Windows required'); process.exit(0); }
 const model = resolve(process.env.DGS_E2E_MODEL ?? 'kontrol1/20260923_1200_SN3_TR0.json');
+const existing = process.argv.includes('--existing');
 const extension = resolve('dist');
 const profile = await mkdtemp(join(tmpdir(), 'ytbs-v612-native-'));
 const args = [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`, '--no-first-run'];
@@ -13,34 +14,79 @@ const launch = () => chromium.launchPersistentContext(profile, { viewport: { wid
 const hostRoot = resolve('native-host/python');
 const manifestPath = join(hostRoot, 'com.ytbs.powerfactory.solver.json');
 const registryPath = 'HKCU:\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.ytbs.powerfactory.solver';
-const python = resolve('.venv/Scripts/python.exe');
+const python = join(hostRoot, '.venv', 'Scripts', 'python.exe');
 const backup = async path => { try { await access(path); return await readFile(path); } catch { return null; } };
 const oldManifest = await backup(manifestPath);
 let oldRegistry = '';
 try {
   oldRegistry = execFileSync('pwsh', ['-NoProfile', '-Command', `if (Test-Path -LiteralPath '${registryPath}') { (Get-Item -LiteralPath '${registryPath}').GetValue('') }`], { encoding: 'utf8' }).trim();
 } catch {}
-let context = await launch();
+let context;
 let installed = false;
 try {
+  context = await launch();
   let worker = context.serviceWorkers()[0];
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30000 });
   const id = new URL(worker.url()).host;
-  await context.close();
-  execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/install-windows.ps1'), '-ExtensionId', id, '-PythonPath', python], { stdio: 'inherit' });
-  installed = true;
-  context = await launch();
+  if (!existing) {
+    await context.close();
+    installed = true;
+    execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/install-windows.ps1'), '-ExtensionId', id, '-PythonPath', python], { stdio: 'inherit' });
+    context = await launch();
+  }
   const page = await context.newPage();
   page.on('pageerror', error => console.error(`Native E2E page error: ${error}`));
+  await page.addInitScript(() => {
+    const connectNative = chrome.runtime.connectNative.bind(chrome.runtime);
+    Object.defineProperty(chrome.runtime, 'connectNative', { configurable: true, value: name => {
+      const port = connectNative(name);
+      port.onMessage.addListener(message => {
+        if (window.__nativeStart === undefined) return;
+        const phase = message.type === 'PROGRESS' ? message.phase : message.type;
+        if (phase === 'RESULT_CHUNK' || window.__nativeProtocolEvents.at(-1)?.phase === phase) return;
+        window.__nativeProtocolEvents.push({ elapsedMs: Math.round(performance.now() - window.__nativeStart), phase,
+          ...(message.type === 'RESULT_SUMMARY' ? { performance: message.performance, byteLength: message.byteLength,
+            convergence: message.convergence } : {}) });
+      });
+      return port;
+    } });
+  });
   await page.goto(`chrome-extension://${id}/workspace.html`);
+  await page.evaluate(() => {
+    window.__nativeMilestones = [];
+    const status = document.querySelector('#v61Status');
+    new MutationObserver(() => {
+      if (window.__nativeStart === undefined) return;
+      const message = status?.textContent?.trim() ?? '';
+      if (message && window.__nativeMilestones.at(-1)?.message !== message)
+        window.__nativeMilestones.push({ elapsedMs: Math.round(performance.now() - window.__nativeStart), message });
+    }).observe(status, { childList: true, subtree: true, characterData: true });
+  });
   await page.locator('#fileInput').setInputFiles(model);
   await page.waitForFunction(() => document.querySelector('#v61Scope')?.textContent?.includes('86.479'), null, { timeout: 180000 });
+  const fullModelHelloMs = await page.evaluate(() => new Promise((resolveTime, reject) => {
+    const started = performance.now();
+    const port = chrome.runtime.connectNative('com.ytbs.powerfactory.solver');
+    const requestId = crypto.randomUUID(), jobId = crypto.randomUUID();
+    const timer = setTimeout(() => { port.disconnect(); reject(Error('Full-model Chrome HELLO timeout')); }, 65000);
+    port.onMessage.addListener(message => {
+      if (message.requestId !== requestId || message.jobId !== jobId || message.type !== 'CAPABILITIES') return;
+      clearTimeout(timer); port.disconnect(); resolveTime(Math.round(performance.now() - started));
+    });
+    port.onDisconnect.addListener(() => { clearTimeout(timer); reject(Error(chrome.runtime.lastError?.message ?? 'Native port disconnected')); });
+    port.postMessage({ type: 'HELLO', protocolVersion: '1.0', requestId, jobId });
+  }));
+  console.log(`Chrome HELLO with full model loaded: ${fullModelHelloMs} ms`);
   await page.locator('#primaryTabs [data-primary="analysis"]').click();
   await page.locator('#v61Engine').selectOption('pandapower');
   await page.locator('#v61HostHealthButton').click();
-  await page.locator('#v61HostHealth').getByText('Bağlı').waitFor({ timeout: 15000 });
+  await page.waitForFunction(() => {
+    const text = document.querySelector('#v61HostHealth')?.textContent ?? '';
+    return text.includes('Motor: pandapower') || text.includes('ZAMAN AŞIMI') || text.includes('BAĞLANTI YOK');
+  }, null, { timeout: 65000 });
   const health = await page.locator('#v61HostHealth').innerText();
-  if (!health.includes('Protocol 1.0') || !health.includes('pandapower 3.5.5')) throw Error(`Native health metadata missing: ${health}`);
+  if (!health.includes('Protokol: 1.0') || !health.includes('Motor: pandapower') || !health.includes('Sürüm: 3.5.5')) throw Error(`Native health metadata missing: ${health}`);
+  await page.evaluate(() => { window.__nativeStart = performance.now(); window.__nativeMilestones = []; window.__nativeProtocolEvents = []; });
   await page.locator('#v61Run').click();
   await page.waitForFunction(() => {
     const status = document.querySelector('#v61Status')?.textContent ?? '';
@@ -52,8 +98,11 @@ try {
   if (!acSummary.includes('86.479') || !acSummary.includes('2.382') || !acSummary.includes('30')) throw Error(`Non-convergence model counts missing: ${acSummary}`);
   if ((await page.locator('#v61Comparison').innerText()).trim()) throw Error('Non-converged AC must not show numeric comparison rows');
   console.log(`Native host full DGS AC: ${acStatus} · ${acSummary}`);
+  console.log(`Native AC phases: ${JSON.stringify(await page.evaluate(() => window.__nativeMilestones))}`);
+  console.log(`Native AC protocol: ${JSON.stringify(await page.evaluate(() => window.__nativeProtocolEvents))}`);
 
   await page.locator('#v61Mode').selectOption('DC');
+  await page.evaluate(() => { window.__nativeStart = performance.now(); window.__nativeMilestones = []; window.__nativeProtocolEvents = []; });
   await page.locator('#v61Run').click();
   await page.waitForFunction(() => {
     const status = document.querySelector('#v61Status')?.textContent ?? '';
@@ -73,20 +122,19 @@ try {
   if (busId) await page.locator('#v61BusSelect').selectOption(busId);
   await page.locator('#v61BusAvailability').getByText('DC yük akışı gerilim büyüklüğü hesaplamaz.').waitFor();
   console.log(`Native host full DGS DC: ${dcStatus}`);
+  console.log(`Native DC phases: ${JSON.stringify(await page.evaluate(() => window.__nativeMilestones))}`);
+  console.log(`Native DC protocol: ${JSON.stringify(await page.evaluate(() => window.__nativeProtocolEvents))}`);
   await mkdir('artifacts/ui-review', { recursive: true });
   await page.screenshot({ path: resolve('artifacts/ui-review/10-result-unavailable-reason.png'), animations: 'disabled' });
   await page.close();
 
-  execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/uninstall-windows.ps1')], { stdio: 'inherit' });
-  const screenshotRun = execFileSync(process.execPath, [resolve('tests/e2e/extension.mjs')], { encoding: 'utf8', stdio: 'inherit',
-    env: { ...process.env, DGS_E2E_MODEL: '', YTBS_E2E_NATIVE_AVAILABLE: '' } });
-  void screenshotRun;
 } finally {
-  await context.close();
+  await context?.close();
   if (installed) {
-    execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/uninstall-windows.ps1')], { stdio: 'inherit' });
+    if (oldRegistry) execFileSync('pwsh', ['-NoProfile', '-Command', `New-Item -Path '${registryPath}' -Force | Out-Null; Set-Item -Path '${registryPath}' -Value '${oldRegistry.replaceAll("'", "''")}'`]);
+    else execFileSync('pwsh', ['-NoProfile', '-File', resolve('native-host/python/scripts/uninstall-windows.ps1')], { stdio: 'inherit' });
     if (oldManifest) await writeFile(manifestPath, oldManifest);
-    if (oldRegistry) execFileSync('pwsh', ['-NoProfile', '-Command', `New-Item -Path '${registryPath}' -Force | Out-Null; Set-Item -Path '${registryPath}' -Value '${oldRegistry.ReplaceAll("'", "''")}'`]);
+    else await rm(manifestPath, { force: true });
   }
   await rm(profile, { recursive: true, force: true });
 }
