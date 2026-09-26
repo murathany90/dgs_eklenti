@@ -69,6 +69,41 @@ def _run_ac_inner(net, options, outer_limit, model, ids, use_controls):
             "unsatisfiedGroups": [], "mappingFindings": [], "voltageTolerancePu": 1e-4}
 
 
+def _run_ac_with_retries(prepared, model, ids, settings):
+    """Deterministic inner-solver ladder; each attempt starts from an isolated network copy."""
+    source_net = prepared[0]
+    base = {"calculate_voltage_angles": True, "enforce_q_lims": settings["enforceReactiveLimits"],
+        "check_connectivity": True, "max_iteration": settings["maxNewtonIterations"], "numba": False,
+        "tolerance_mva": 1e-8, "distributed_slack": False, "voltage_depend_loads": False,
+        "trafo_model": "t", "trafo_loading": "current", "switch_rx_ratio": 2}
+    attempts = [
+        ("NR_AUTO", {"algorithm": "nr", "init": "auto"}),
+        ("NR_FLAT", {"algorithm": "nr", "init": "flat"}),
+        ("IWAMOTO_NR_DC_INIT", {"algorithm": "iwamoto_nr", "init": "dc"}),
+    ]
+    failures, last = [], None
+    for method, profile in attempts:
+        net = copy.deepcopy(source_net)
+        options = {**base, **profile}
+        try:
+            outer = _run_ac_inner(net, options, settings["maxOuterIterations"], model, ids, use_controls=True)
+            last = (net, options, outer)
+            if outer.get("converged"):
+                return net, options, outer, {"convergenceMethod": method, "fallbackUsed": bool(failures),
+                    "attempts": failures + [{"method": method, "status": "CONVERGED"}]}
+            failures.append({"method": method, "status": "CONTROL_TARGET_UNMET" if not outer.get("lastError") else "INNER_NR_FAILED",
+                "error": str(outer.get("lastError"))[:300] if outer.get("lastError") else None})
+            # Changing the NR start/algorithm cannot cure a fully solved inner state with only a
+            # physical control-target limit. Do not rerun expensive outer loops in that case.
+            if not outer.get("lastError"):
+                return net, options, outer, {"convergenceMethod": method, "fallbackUsed": bool(failures[:-1]), "attempts": failures}
+        except Exception as error:
+            failures.append({"method": method, "status": "INNER_NR_FAILED", "error": str(error)[:300]})
+    if last is not None:
+        return last[0], last[1], last[2], {"convergenceMethod": attempts[-1][0], "fallbackUsed": True, "attempts": failures}
+    raise RuntimeError("AC solver retry ladder produced no attempt")
+
+
 def run(model, mode, prepared=None, diagnostics=None):
     if mode not in ("AC", "DC"):
         raise ValueError("mode must be AC or DC")
@@ -83,14 +118,14 @@ def run(model, mode, prepared=None, diagnostics=None):
     outer = None
     try:
         if mode == "AC":
-            options = {"algorithm": "nr", "calculate_voltage_angles": True,
-                "enforce_q_lims": settings["enforceReactiveLimits"], "check_connectivity": True,
-                "init": "auto", "max_iteration": settings["maxNewtonIterations"], "numba": False}
-            outer = _run_ac_inner(net, options, settings["maxOuterIterations"], model, ids, use_controls=True)
+            net, options, outer, retry = _run_ac_with_retries(prepared, model, ids, settings)
             if not outer.get("converged"):
                 solve_ms = (time.perf_counter() - started) * 1000
                 calc = extract_ac_diagnostics(net, ids, model, outer=outer)
-                return _blank_nonconverged(model, diagnostics, unsupported, conversion_ms, mode, solve_ms, calc, outer.get("lastError"))
+                calc.update(retry)
+                result = _blank_nonconverged(model, diagnostics, unsupported, conversion_ms, mode, solve_ms, calc, outer.get("lastError"))
+                result["solverOptions"] = {**options, "effectiveMaxOuterIterations": settings["maxOuterIterations"], **retry}
+                return result
         else:
             pp.rundcpp(net, check_connectivity=True, numba=False)
     except LoadflowNotConverged as error:
@@ -109,7 +144,12 @@ def run(model, mode, prepared=None, diagnostics=None):
     result["preflight"] = diagnostics
     result["performance"] = {"conversionMs": conversion_ms, "solveMs": solve_ms}
     if mode == "AC":
-        result["calculationDiagnostics"] = extract_ac_diagnostics(net, ids, model, outer=outer)
+        calc = extract_ac_diagnostics(net, ids, model, outer=outer)
+        calc.update(retry)
+        result["calculationDiagnostics"] = calc
+        result["solverOptions"] = {**options, "effectiveMaxOuterIterations": settings["maxOuterIterations"], **retry}
+    else:
+        result["solverOptions"] = {"algorithm": "dc", "distributed_slack": False, "check_connectivity": True, "numba": False}
     return result
 
 

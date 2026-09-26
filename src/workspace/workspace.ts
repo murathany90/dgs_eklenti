@@ -4,10 +4,11 @@ import { putRecord, getRecord, deleteRecord, getCalculation, getCalculationHisto
 import { BrowserApproxSolver } from '../solvers/browser-approx-solver.ts';
 import { NativeHostError, PandapowerSolver } from '../solvers/pandapower-solver.ts';
 import { toLegacyRows, type ACPreflightDiagnostics, type ResultSet } from '../analysis/result-set.ts';
-import { fromLegacyRows } from '../analysis/legacy-adapter.ts';
+import { fromLegacyRows, type BrowserLegacyDiagnostics } from '../analysis/legacy-adapter.ts';
 import type { ElectricalCanonicalNetwork } from '../model/electrical-types.ts';
 import { displayEquipmentType, presentUserText } from '../presentation/equipmentPresentation.ts';
 import { calculationKeyId, createCalculationKey, scenarioIsActive, sha256, type CalculationKey, type CalculationMetadata, type ScenarioPayload } from '../analysis/calculation-key.ts';
+import { findComparableEngineResult } from '../analysis/engine-comparison.ts';
 import { createCalculationJob, transitionCalculationJob, type CalculationJob, type CalculationJobState } from '../analysis/calculation-job.ts';
 import { availabilityText, busAvailability } from '../analysis/result-availability.ts';
 import { calculationEngineLabel, calculationHistoryText, convergenceStatusLabel } from '../presentation/calculationPresentation.ts';
@@ -17,7 +18,7 @@ import { electricalResultRows, electricalResultIndexes, equipmentResults, displa
 interface LegacyModel extends StationLookup { raw: DgsDocument; rid: string; name: string; stats: Record<string, number> }
 interface LegacyBridge {
   getActive: () => LegacyModel | null;
-  getSolver: () => { solved?: number; total?: number; summary?: unknown[] } | null;
+  getSolver: () => { solved?: number; total?: number; summary?: unknown[]; findings?: BrowserLegacyDiagnostics } | null;
   getResultSets: () => Array<{ rows?: Array<{ cls?: string; id?: string; metric?: string; terminal?: string; unit?: string; quality?: string; value?: number; source?: string }> }>;
   getScenario: () => { lines: unknown[]; switches: unknown[]; restoredTerminals?: string[]; autoRestoreTerminals?: boolean; revision?: number };
   restoreScenario?: (snapshot: Partial<ScenarioPayload>) => void;
@@ -478,7 +479,7 @@ async function makeSelectedKey(): Promise<CalculationKey> {
     engine: engine === 'browser' ? 'browser-approx' : 'pandapower',
     mode,
     scenario,
-    solverVersion: engine === 'browser' ? 'browser-approx-v5.5' : 'pandapower@3.5.5/protocol-1.0',
+     solverVersion: engine === 'browser' ? 'browser-approx-v6.1.6' : 'pandapower@3.5.5/protocol-1.0',
     options: engine === 'browser' ? { scope: 'TRANSMISSION_REDUCED' } : { algorithm: 'nr', enforce_q_lims: true, max_iteration: 30, numba: false },
   });
 }
@@ -611,9 +612,15 @@ function preflightEntries(d: ACPreflightDiagnostics): Array<[string, string]> {
     ['Elektriksel ada', `${nf.format(d.electricalIslandCount)} · kaynaklı ${nf.format(d.islandsWithSlackCount)} · kaynaksız ${nf.format(d.islandsWithoutSlackCount)}`],
     ['Kaynaksız bara', nf.format(d.unsuppliedBusCount)],
     ['Üretim − tüketim başlangıç farkı', `${fmt(d.initialPImbalanceMw)} MW`],
+    ['ElmVac · eşlenen / aktif / toplam', `${nf.format(d.internationalConnectionsMapped ?? 0)} / ${nf.format(d.internationalConnectionsInService ?? 0)} / ${nf.format(d.internationalConnectionCount ?? 0)}`],
+    ['ElmVac Pload / Qload toplamı · yaklaşım', `${fmt(d.internationalPmw)} MW / ${fmt(d.internationalQmvar)} MVAr · ${d.internationalMappingMode ?? 'UNKNOWN'}`],
     ['PV / PQ bara', `${nf.format(d.pvBusCount)} / ${nf.format(d.pqBusCount)}`],
     ['Q sınırı eksik PV üretim ünitesi', `${nf.format(d.pvUnitsMissingQLimits)} / ${nf.format(d.pvUnitCount)}`],
     ['İstasyon kontrolü · serviste', `${nf.format(d.stationControlsInService ?? 0)} / ${nf.format(d.stationControlCount ?? 0)}`],
+    ['Station · tam / yaklaşık / çözülmeyen', `${nf.format(Math.max(0, (d.stationControllersApplied ?? 0) - (d.stationControllersApproximate ?? 0)))} / ${nf.format(d.stationControllersApproximate ?? 0)} / ${nf.format(d.stationControllersUnsupported ?? 0)}`],
+    ['Çok üniteli / droop kısmi', `${nf.format(d.multiUnitControllersApplied ?? 0)}/${nf.format(d.multiUnitControllersTotal ?? 0)} · ${nf.format(d.droopControllersPartial ?? 0)}/${nf.format(d.droopControllersTotal ?? 0)}`],
+    ['ElmSecctrl / ElmBoundary', `${nf.format(d.secondaryControllersTotal ?? 0)} / ${nf.format(d.boundariesTotal ?? 0)}`],
+    ['ComLdf iPbalancing', `${d.activePowerBalancingModeCode ?? 'UNKNOWN'} · ${d.activePowerBalancingBehavior ?? 'UNKNOWN'}`],
     ['Uzak kontrol toplam / uygulanan · paylaşım grubu uygulanan · droop uygulanan', `${nf.format(d.remoteVoltageControllerCount ?? 0)} / ${nf.format(d.remoteVoltageControllersApplied ?? 0)} · ${nf.format(d.reactiveSharingGroupsApplied ?? 0)} · ${nf.format(d.droopControllersApplied ?? 0)}`],
     ['ElmGenStat Q-limit kapsamı', `${nf.format(d.elmGenStatQLimitCoverage?.available ?? 0)} / ${nf.format(d.elmGenStatQLimitCoverage?.total ?? 0)}`],
     ['NR iterasyon üst sınırı', setting('maxNewtonIterations')],
@@ -644,6 +651,7 @@ function renderConvergenceDiagnosis(result: ResultSet | null): void {
   const unavailable = 'Elde edilemedi';
   const entries: Array<[string, string]> = [
     ['Toplam iç Newton–Raphson iterasyonu', d.innerIterations === null ? unavailable : nf.format(d.innerIterations)],
+    ['İç NR / dış kontrol durumu', `${d.innerSolverConverged === null || d.innerSolverConverged === undefined ? unavailable : d.innerSolverConverged ? 'yakınsadı' : 'yakınsamadı'} / ${d.controlSystemConverged === null || d.controlSystemConverged === undefined ? unavailable : d.controlSystemConverged ? 'karşılandı' : 'karşılanmadı'}`],
     ['Dış kontrol iterasyonu', d.outerIterations === null ? unavailable : nf.format(d.outerIterations)],
     ['PV → PQ dönüşümü', d.pvToPqCount === null ? unavailable : nf.format(d.pvToPqCount)],
     ['Qmin / Qmax sınırında', `${d.qMinHits === null || d.qMinHits === undefined ? unavailable : nf.format(d.qMinHits)} / ${d.qMaxHits === null || d.qMaxHits === undefined ? unavailable : nf.format(d.qMaxHits)}`],
@@ -689,13 +697,29 @@ function renderComparison(): void {
     const controls = p ? `${nf.format(p.unsupportedOrUnsolvedControlCount)} çözülmeyen kontrol kaydı` : 'Kontrol kapsamı yok';
     const phase = p ? `${nf.format(p.transformerPhaseAngleCoverage?.available ?? Math.max(0, p.modelCounts.transformer - p.transformerPhaseAngleMissing))}/${nf.format(p.transformerPhaseAngleCoverage?.total ?? p.modelCounts.transformer)} trafoda faz bilgisi` : 'Trafo faz bilgisi yok';
     const reactance = p ? `${nf.format(p.negativeReactanceCount)} negatif X · ${nf.format(p.candidateNonPositiveCompensatedPathCount)} kompanzasyonlu X≤0 aday yolu` : 'Empedans tanısı yok';
-    const iterations = result.iterations === null ? 'İç NR iterasyon sayısı elde edilemedi' : `${nf.format(result.iterations)} iç NR iterasyonu`;
-    nonConvergenceNotice.innerHTML = `<strong>AC çözümü yakınsamadı (${safe(iterations)}). Sayısal AC sonuçları gösterilmiyor.</strong><br>Model: ${nf.format(summary.modelBusCount ?? p?.modelCounts.bus ?? 0)} bara · ${nf.format(summary.modelLineCount ?? p?.modelCounts.line ?? 0)} hat · ${nf.format(summary.modelTransformerCount ?? p?.modelCounts.transformer ?? 0)} transformatör.<br><b>İncelenmesi gereken model/kontrol eksikleri:</b> ${safe(qMissing)}; ${safe(controls)}; ${safe(phase)}; ${safe(reactance)}.`;
+    const iterations = result.iterations === null ? 'iç NR iterasyon sayısı elde edilemedi' : `${nf.format(result.iterations)} iç NR iterasyonu`;
+    const unmet = (result.calculationDiagnostics?.outerControl as { unsatisfiedGroups?: unknown[] } | null | undefined)?.unsatisfiedGroups?.length ?? 0;
+    const exhausted = result.calculationDiagnostics?.nonConvergenceReason === 'CONTROL_EXHAUSTED';
+    const detail = exhausted
+      ? `${nf.format(unmet)} station controller Q sınırlarında tükendi; gerilim hedefi karşılanmadı.`
+      : result.calculationDiagnostics?.innerSolverConverged && result.calculationDiagnostics?.controlSystemConverged === false
+      ? `İç AC denklemleri çözüldü; ${nf.format(unmet)} gerilim kontrol grubu hedefini karşılamadı.`
+      : `İç AC çözümü yakınsamadı (${iterations}).`;
+    nonConvergenceNotice.innerHTML = `<strong>${safe(detail)} Sayısal AC sonuçları gösterilmiyor.</strong><br>Model: ${nf.format(summary.modelBusCount ?? p?.modelCounts.bus ?? 0)} bara · ${nf.format(summary.modelLineCount ?? p?.modelCounts.line ?? 0)} hat · ${nf.format(summary.modelTransformerCount ?? p?.modelCounts.transformer ?? 0)} transformatör.<br><b>İncelenmesi gereken model/kontrol eksikleri:</b> ${safe(qMissing)}; ${safe(controls)}; ${safe(phase)}; ${safe(reactance)}.`;
     comparison.innerHTML = '';
     return;
   }
   if (!dcNotice.hidden) dcNotice.textContent = 'Hesap başarılı. Aktif güç akışı hazır. Gerilim büyüklüğü ve reaktif güç DC analizinde hesaplanmaz.';
-  const sources = [['reference', analysisState.referenceResult], [analysisState.activeEngine, result]] as const;
+  const compareKey = currentCalculationKey;
+  const comparisonRecords = [...analysisState.calculationsByKey.values()].map(record => ({ savedAt: record.savedAt, result: record.result }));
+  if (result?.calculation && resultMatchesSelection(result)) comparisonRecords.push({ savedAt: Date.now(), result });
+  const pandapowerResult = compareKey ? findComparableEngineResult(comparisonRecords, {
+    engine: 'pandapower', modelHash, mode: compareKey.mode, scenarioHash: compareKey.scenarioHash, solverVersion: 'pandapower@3.5.5/protocol-1.0',
+  }) : null;
+  const browserResult = compareKey ? findComparableEngineResult(comparisonRecords, {
+    engine: 'browser-approx', modelHash, mode: compareKey.mode, scenarioHash: compareKey.scenarioHash, solverVersion: 'browser-approx-v6.1.6',
+  }) : null;
+  const sources = [['reference', analysisState.referenceResult], ['pandapower', pandapowerResult], ['browser', browserResult]] as const;
   const merged = new Map<string, ComparisonRecord>();
   for (const [source, resultSet] of sources) for (const item of metricRecords(resultSet)) {
     const record = merged.get(item.key) ?? { key: item.key, category: item.category, id: item.id, name: item.name, displayName: item.displayName, secondaryLabel: item.secondaryLabel, station: item.station, nominalKv: item.nominalKv, type: item.type, metric: item.metric, unit: item.unit };
@@ -721,11 +745,13 @@ function renderComparison(): void {
   const pages = Math.max(1, Math.ceil(rows.length / pageSize)); resultPage = Math.min(resultPage, pages - 1);
   const visible = rows.slice(resultPage * pageSize, (resultPage + 1) * pageSize);
   const body = visible.map(row => {
-    const diff = row.reference === undefined || row.pandapower === undefined ? null : Math.abs(row.reference - row.pandapower);
-    const relative = diff === null || row.reference === undefined || row.reference === 0 ? null : diff / Math.abs(row.reference) * 100;
-    return `<tr><td class="analysisEquipment"><b>${safe(row.displayName)}</b><small>${safe(displayEquipmentType(row.type))} · ${safe(row.secondaryLabel)} · kimlik ${safe(row.id)}</small></td><td>${safe(row.metric)}</td><td>${safe(row.unit)}</td><td class="numeric">${fmt(row.reference, 4)}</td><td class="numeric">${fmt(row.pandapower, 4)}</td><td class="numeric">${fmt(row.browser, 4)}</td><td class="numeric">${fmt(diff, 4)}</td><td class="numeric">${relative === null ? '—' : fmt(relative, 2) + '%'}</td></tr>`;
+    const referenceDiff = row.reference === undefined || row.pandapower === undefined ? null : Math.abs(row.reference - row.pandapower);
+    const referenceRelative = referenceDiff === null || row.reference === undefined || row.reference === 0 ? null : referenceDiff / Math.abs(row.reference) * 100;
+    const engineDiff = row.pandapower === undefined || row.browser === undefined ? null : Math.abs(row.pandapower - row.browser);
+    const engineRelative = engineDiff === null || row.pandapower === undefined || row.pandapower === 0 ? null : engineDiff / Math.abs(row.pandapower) * 100;
+    return `<tr><td class="analysisEquipment"><b>${safe(row.displayName)}</b><small>${safe(displayEquipmentType(row.type))} · ${safe(row.secondaryLabel)} · kimlik ${safe(row.id)}</small></td><td>${safe(row.metric)}</td><td>${safe(row.unit)}</td><td class="numeric">${!analysisState.referenceResult ? 'Yüklenmedi' : fmt(row.reference, 4)}</td><td class="numeric">${fmt(row.pandapower, 4)}</td><td class="numeric">${fmt(row.browser, 4)}</td><td class="numeric">${fmt(referenceDiff, 4)}</td><td class="numeric">${referenceRelative === null ? '—' : fmt(referenceRelative, 2) + '%'}</td><td class="numeric">${fmt(engineDiff, 4)}</td><td class="numeric">${engineRelative === null ? '—' : fmt(engineRelative, 2) + '%'}</td></tr>`;
   }).join('');
-  comparison.innerHTML = `<table class="analysisMetricTable"><thead><tr><th>Ekipman</th><th>Büyüklük</th><th>Birim</th><th>PowerFactory Referans</th><th>Yerel Tam Şebeke</th><th>Tarayıcı Yaklaşık</th><th>Mutlak Fark</th><th>Göreli Fark</th></tr></thead><tbody>${body}</tbody></table>`;
+  comparison.innerHTML = `<table class="analysisMetricTable"><thead><tr><th>Ekipman</th><th>Büyüklük</th><th>Birim</th><th>PowerFactory Referans</th><th>Yerel Tam Şebeke</th><th>Tarayıcı Yaklaşık</th><th>PF–Yerel mutlak fark</th><th>PF–Yerel göreli fark</th><th>Yerel–Yaklaşık mutlak fark</th><th>Yerel–Yaklaşık göreli fark</th></tr></thead><tbody>${body}</tbody></table>`;
   const pager = solverPanel.querySelector<HTMLElement>('#v61Pager')!;
   pager.replaceChildren();
   const first = resultPage * pageSize + 1, last = Math.min(rows.length, first + pageSize - 1);
@@ -858,7 +884,7 @@ solverPanel.querySelector<HTMLInputElement>('#v61Reference')!.onchange = async e
 };
 
 const nativeSolver = new PandapowerSolver();
-const browserSolver = new BrowserApproxSolver(legacy.runAnalysis, legacy.getSolver);
+const browserSolver = new BrowserApproxSolver(legacy.runAnalysis, legacy.getSolver, () => legacy.getResultSets().at(-1)?.rows ?? []);
 Object.assign(window, { V6Solver: browserSolver });
 async function runSelectedSolver(): Promise<void> {
   if (!network) { updateStatus('Önce DGS modelini yükleyin.', 'warn'); return; }
@@ -909,12 +935,8 @@ async function executeSelectedCalculation(key: CalculationKey, engine: Engine, m
     let result: ResultSet;
     if (engine === 'browser') {
       setJobState('SOLVING', 'Tarayıcı Yaklaşık Çözüm çalışıyor…');
-      await browserSolver.runLoadFlow(calculationNetwork, { mode: 'AC' });
+      result = await browserSolver.runLoadFlow(calculationNetwork, { mode: 'AC' });
       if (!selectionIsCurrent()) return;
-      const source = legacy.getResultSets().at(-1);
-      const rows = (source?.rows ?? []).filter(row => typeof row.value === 'number' && Number.isFinite(row.value));
-      const legacyState = legacy.getSolver();
-      result = fromLegacyRows(calculationNetwork, rows, legacyState?.solved === legacyState?.total ? 'CONVERGED' : 'PARTIAL');
       setJobState('SERIALIZING', 'Tarayıcı sonucu kaydediliyor…');
     } else {
       result = await nativeSolver.runLoadFlow(calculationNetwork, { mode }, phase => {
@@ -1115,7 +1137,7 @@ window.V6Bridge = {
     const state = legacy.getSolver();
     const result = fromLegacyRows(model, rows, state?.solved === state?.total ? 'CONVERGED' : 'PARTIAL');
     void (async () => {
-      const key = await createCalculationKey({ modelHash, engine: 'browser-approx', mode: 'AC', scenario: scenarioPayload(), solverVersion: 'browser-approx-v5.5', options: { scope: 'TRANSMISSION_REDUCED' } });
+      const key = await createCalculationKey({ modelHash, engine: 'browser-approx', mode: 'AC', scenario: scenarioPayload(), solverVersion: 'browser-approx-v6.1.6', options: { scope: 'TRANSMISSION_REDUCED' } });
       const saved = await saveResult(key, result, new Date().toISOString(), result.summary.solveMs ?? 0);
       if (analysisState.activeEngine === 'browser' && calculationKeyId(await makeSelectedKey()) === saved.keyId) {
         analysisState.activeCalculationKeyId = saved.keyId; analysisState.activeResult = result;
@@ -1128,14 +1150,14 @@ window.V6Bridge = {
 for (const id of ['v54GoAnalysis', 'runSolver']) document.querySelector(`#${id}`)?.addEventListener('click', () => navigate('analysis'));
 document.querySelector('#v54GoScenario')?.addEventListener('click', () => navigate('scenario'));
 
-document.title = 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.5';
+document.title = 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.6';
 const appTitle = document.querySelector<HTMLElement>('.apphead h1');
 if (appTitle) appTitle.textContent = 'Grid Analyzer';
 const brandLogo = document.querySelector<HTMLElement>('.brandlogo');
 if (brandLogo) brandLogo.textContent = 'GA';
 const appVersion = document.querySelector<HTMLElement>('.brand small');
 if (appVersion) appVersion.textContent = 'Şebeke Analiz Sistemi';
-if (footer) footer.textContent = 'Grid Analyzer · Chrome MV3 · v6.1.5';
+if (footer) footer.textContent = 'Grid Analyzer · Chrome MV3 · v6.1.6';
 renderMetadata(); renderScope(); renderScenario(); presentationSweep();
 
 void getRecord<{ file: File; name: string }>('models', 'pending').then(async record => {

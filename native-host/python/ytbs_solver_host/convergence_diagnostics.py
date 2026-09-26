@@ -43,6 +43,15 @@ def extract_ac_diagnostics(net, ids, model, error=None, outer=None):
     ppc = ppc if isinstance(ppc, dict) else {}
     internal = ppc.get("internal") if isinstance(ppc.get("internal"), dict) else ppc
     bus_lookup = getattr(net, "_pd2ppc_lookups", {}).get("bus") if hasattr(net, "_pd2ppc_lookups") else None
+    unsatisfied = outer.get("unsatisfiedGroups", []) if isinstance(outer, dict) else []
+    if error or (isinstance(outer, dict) and outer.get("lastError")) or any(item.get("status") == "INNER_NR_FAILED" for item in unsatisfied):
+        reason = "INNER_NR_DIVERGED"
+    elif any(item.get("status") == "ALL_UNITS_AT_Q_LIMIT" for item in unsatisfied):
+        reason = "CONTROL_EXHAUSTED"
+    elif unsatisfied:
+        reason = "OUTER_CONTROL_DIVERGED"
+    else:
+        reason = None
     result = {
         "diagnosticOnly": True,
         "innerIterations": (sum(value for value in outer.get("innerIterations", []) if isinstance(value, int))
@@ -50,6 +59,11 @@ def extract_ac_diagnostics(net, ids, model, error=None, outer=None):
             else int(ppc["iterations"]) if _finite(ppc.get("iterations")) else None),
         "outerIterations": outer.get("outerIterations") if isinstance(outer, dict) else 0,
         "outerControl": outer,
+        "innerSolverConverged": error is None and not (isinstance(outer, dict) and outer.get("lastError"))
+            and not any(item.get("status") == "INNER_NR_FAILED" for item in unsatisfied),
+        "controlSystemConverged": outer.get("converged") if isinstance(outer, dict) else None,
+        "convergenceMethod": "NR",
+        "nonConvergenceReason": reason,
         "maxPMismatchMw": None,
         "maxQMismatchMvar": None,
         "voltagePuMin": None,

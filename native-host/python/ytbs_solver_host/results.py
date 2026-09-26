@@ -90,6 +90,11 @@ def extract(net, ids, model, mode, unsupported, elapsed_ms):
 
     load_p = sum(item.get("pMw", 0) for item in model.get("loads", []) if item.get("id") in ids["load"] and item.get("inService"))
     load_q = sum(item.get("qMvar", 0) for item in model.get("loads", []) if item.get("id") in ids["load"] and item.get("inService"))
+    international_results = [{"id": item["id"], "pMw": clean(item.get("pLoadMw")), "qMvar": clean(item.get("qLoadMvar")),
+        "mappingMode": item.get("mappingMode"), "quality": "APPROXIMATE", "source": "ElmVac.Pload/Qload"}
+        for item in model.get("internationalConnections", []) if item.get("id") in ids.get("international", {}) and item.get("inService") is True]
+    load_p += sum(item["pMw"] or 0.0 for item in international_results)
+    load_q += sum(item["qMvar"] or 0.0 for item in international_results)
     gen_p = sum(item["pMw"] or 0 for item in generators) + sum(item["pMw"] or 0 for item in external_grids)
     gen_q = sum(item["qMvar"] or 0 for item in generators) + sum(item["qMvar"] or 0 for item in external_grids)
     loss_p = sum(item["pLossMw"] or 0 for item in branches + transformers) if mode == "AC" else None
@@ -103,7 +108,8 @@ def extract(net, ids, model, mode, unsupported, elapsed_ms):
         "maxMismatch": None, "validation": "PARTIAL" if unsupported or model.get("completeness") != "COMPLETE" else "COMPLETE_UNVALIDATED",
         "warnings": ["pandapower convergence is not PowerFactory validation"], "unsupported": unsupported,
         "buses": buses, "branches": branches, "transformers": transformers, "generators": generators,
-        "externalGrids": external_grids, "losses": [{"id": "network", "pMw": loss_p, "qMvar": loss_q}],
+        "externalGrids": external_grids, "internationalConnections": international_results,
+        "losses": [{"id": "network", "pMw": loss_p, "qMvar": loss_q}],
         "summary": {"generationMw": gen_p, "generationMvar": gen_q if mode == "AC" else None, "loadMw": load_p, "loadMvar": load_q if mode == "AC" else None,
                     "activeLossMw": loss_p, "reactiveLossMvar": loss_q, "busCount": len(buses),
                     "lineCount": len([item for item in model.get("lines", []) if item.get("id") in ids["line"]]),

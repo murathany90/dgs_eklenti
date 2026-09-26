@@ -491,7 +491,10 @@ const v3OldActivate=activateModel;activateModel=function(m){v3OldActivate(m);if(
 const v3OldClear=clearAll;clearAll=function(){v3OldClear();resetV3(null);};
 
 function makeHVGraph(m,overrides=null){
- const findings={unsupported:[],excludedInputs:[],skippedBranches:[],projected:0,ambiguous:0,shuntApprox:0,switches:0,retained66:0};
+ const elmVacRows=m.t('ElmVac')?.Values||[];let elmVacInService=0;
+ for(let i=0;i<elmVacRows.length;i++)if(m.row('ElmVac',i).outserv!==1)elmVacInService++;
+ const findings={unsupported:[],excludedInputs:[],skippedBranches:[],projected:0,ambiguous:0,shuntApprox:0,switches:0,retained66:0,
+  internationalConnections:{total:elmVacRows.length,inService:elmVacInService,mapped:0,mappedIds:[],notMappedIds:[],pLoadMw:0,qLoadMvar:0,mode:'FIXED_PQ_LOAD_APPROXIMATION'}};
  const tTerm=m.t('ElmTerm'),aFi=m.attrAt('ElmTerm','FID'),aV=m.attrAt('ElmTerm','uknom'),aOut=m.attrAt('ElmTerm','outserv');
  const voltage=new Map(),parent=new Map(),termGroup=new Map(),termInfo=new Map();
  for(let r of tTerm.Values){let id=String(r[aFi]);let v=Number(r[aV]);if(!(v>0&&Number.isFinite(v))||(r[aOut]===1&&!(window.YTBS_V53&&YTBS_V53.isTerminalRestored(id))))continue;voltage.set(id,v);parent.set(id,id);termInfo.set(id,r);if(v>=66)findings.retained66++;}
@@ -510,8 +513,15 @@ function makeHVGraph(m,overrides=null){
  for(let t of trList){if(low.has(t.a)&&high.has(t.b))addBoundary(t.a,t.b);if(low.has(t.b)&&high.has(t.a))addBoundary(t.b,t.a);}
  let busIds=[...high],bidx=new Map(busIds.map((x,i)=>[x,i]));let ins=busIds.map(()=>[0,0]),source=busIds.map(()=>0),noSource=0;
  function route(tid,label){const a=termGroup.get(cubs.get(String(tid)));if(!a)return null;if(high.has(a))return bidx.get(a);if(low.has(a)){let list=boundaries.get(lowFind(a));if(list?.size===1){findings.projected++;return bidx.get([...list][0]);}if(list?.size>1)findings.ambiguous++;findings.excludedInputs.push(label);return null;}return null;}
- function addInputs(cls,pk,qk,sign){for(let i=0;i<(m.t(cls)?.Values.length||0);i++){let r=m.row(cls,i);if(r.outserv===1)continue;let p=Number(r[pk]??0),q=Number(r[qk]??0);if(!Number.isFinite(p)||!Number.isFinite(q)){findings.excludedInputs.push(cls+':'+r.FID+':geçersiz P/Q');continue;}let b=route(r.bus1,cls+':'+r.FID);if(b===null)continue;ins[b][0]+=sign*p;ins[b][1]+=sign*q;if(sign>0)source[b]+=Math.max(0,p);}}
- addInputs('ElmSym','pgini','qgini',1);addInputs('ElmGenStat','pgini','qgini',1);addInputs('ElmLod','plini','qlini',-1);
+  function addInputs(cls,pk,qk,sign){for(let i=0;i<(m.t(cls)?.Values.length||0);i++){
+   let r=m.row(cls,i);if(r.outserv===1)continue;
+   let p=Number(r[pk]??0),q=Number(r[qk]??0);
+   if(!Number.isFinite(p)||!Number.isFinite(q)){findings.excludedInputs.push(cls+':'+r.FID+':geçersiz P/Q');if(cls==='ElmVac')findings.internationalConnections.notMappedIds.push(String(r.FID));continue;}
+   let b=route(r.bus1,cls+':'+r.FID);if(b===null){if(cls==='ElmVac')findings.internationalConnections.notMappedIds.push(String(r.FID));continue;}
+   ins[b][0]+=sign*p;ins[b][1]+=sign*q;if(sign>0)source[b]+=Math.max(0,p);
+   if(cls==='ElmVac'){findings.internationalConnections.mapped++;findings.internationalConnections.mappedIds.push(String(r.FID));findings.internationalConnections.pLoadMw+=p;findings.internationalConnections.qLoadMvar+=q;}
+  }}
+  addInputs('ElmSym','pgini','qgini',1);addInputs('ElmGenStat','pgini','qgini',1);addInputs('ElmLod','plini','qlini',-1);addInputs('ElmVac','Pload','Qload',-1);
  const v52Generators=[],v52Limits=new Map();
  for(const cl of ['ElmSym','ElmGenStat'])for(let j=0;j<(m.t(cl)?.Values.length||0);j++){
    const g=m.row(cl,j);if(g.outserv===1||g.av_mode!=='constv')continue;
@@ -637,7 +647,9 @@ function applyComputedIslands(m,net,results){if(active!==m)return;let records=[]
  if(records.length){let set=newDgsResultSet('calculation',summary.some(x=>x.status==='CONVERGED_NR_EXPERIMENTAL')?'66 kV+ Newton düzeltmeli DENEYSEL hesap · ölçüm değil':'66 kV+ yaklaşık AC-PQ · Newton düzeltmesi bu modelde yakınsamadı',records,{summary,findings:net.findings});v2.sets.splice(0);v2.sets.push(set);v2.selectedSet=set.id;}
  let f=net.findings,lowMessage=f.excludedInputs.length?`⚠ ${f.excludedInputs.length} ekipman girdisi sınır eşleştirme veya veri yetersizliği nedeniyle hariç; tam iletim sistemi hesabı değildir.`:'',unsupported=f.unsupported.length?`⚠ ${f.unsupported.length} trafo kademesi / seri eleman / ada uyarısı; tam PowerFactory eşdeğerliği yok.`:'';
  v3.solver={findings:f,summary,solved:usable,total:results.length,rows:records.length};
- let text=`66 kV+ deneysel AC-PQ hesabı: ${usable}/${results.length} ada yakınsadı; ${nf.format(records.length)} hesap satırı. ${lowMessage} ${unsupported} Newton düzeltmesi/PV Q sınırı kısmi; alt gerilim, çoklu ünite Q paylaşımı ve kimi trafo kontrolü yaklaşık. İşletme kararı için kullanılamaz.`;
+  const international=f.internationalConnections;
+  let internationalMessage=international.inService?` ${international.mapped}/${international.inService} uluslararası bağlantı sabit-PQ yaklaşımıyla eklendi (${nf.format(international.pLoadMw)} MW / ${nf.format(international.qLoadMvar)} MVAr); ElmVac kaynak/empedans davranışı modellenmiyor.`:'';
+  let text=`66 kV+ deneysel AC-PQ hesabı: ${usable}/${results.length} ada yakınsadı; ${nf.format(records.length)} hesap satırı.${internationalMessage} ${lowMessage} ${unsupported} Newton düzeltmesi/PV Q sınırı kısmi; alt gerilim, çoklu ünite Q paylaşımı ve kimi trafo kontrolü yaklaşık. İşletme kararı için kullanılamaz.`;
  if(summary.some(x=>x.nrFallback))text+=' ⚠ Newton düzeltmesi bu ulusal modelde yakınsamadı; daha önceki yaklaşık AC-PQ sonuçları korunmuştur. Ünite bazlı Q sonucu üretilmedi.';putText('solverStatus',text);$('solverStatus').className='notice '+(usable===results.length&&!f.excludedInputs.length?'':'warn');$('solverDiagnostics').textContent=JSON.stringify({findings:f,summary},null,2).slice(0,16000);
  if(!usable)putText('mapDataNote','Hiçbir ada kabul toleransında yakınsamadı; P/Q/V hesap sonucu ve animasyon gösterilmiyor.');
  listSets();if(currentView==='analysis')renderAnalysis();if(currentView==='map')drawMap();if(currentView==='info')renderInfo();status(`AC-PQ hesap: ${usable}/${results.length} ada · ${records.length} kayıt`);if(typeof window.v52UpdateBadge==='function')window.v52UpdateBadge();

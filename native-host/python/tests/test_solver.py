@@ -53,6 +53,65 @@ class ElectricalTests(unittest.TestCase):
         self.assertGreater(result["summary"]["activeLossMw"], 0)
         self.assertAlmostEqual(result["summary"]["generationMw"] - result["summary"]["loadMw"], result["summary"]["activeLossMw"], delta=0.3)
 
+    def test_ac_retry_ladder_records_fallback_method_and_options(self):
+        import pandapower as pp
+        model = base(); line(model, r=1.0); load(model, 1, 10, 2)
+        original = pp.runpp
+        calls = []
+        def fail_first(net, **options):
+            calls.append(options.get("init"))
+            if len(calls) == 1:
+                raise LoadflowNotConverged("forced first-profile failure")
+            return original(net, **options)
+        with patch("ytbs_solver_host.pandapower_adapter.pp.runpp", side_effect=fail_first):
+            result = run(model, "AC")
+        self.assertEqual(result["convergence"], "CONVERGED")
+        self.assertEqual(calls[:2], ["auto", "flat"])
+        self.assertEqual(result["calculationDiagnostics"]["convergenceMethod"], "NR_FLAT")
+        self.assertTrue(result["calculationDiagnostics"]["fallbackUsed"])
+        self.assertFalse(result["solverOptions"]["distributed_slack"])
+        self.assertEqual(result["solverOptions"]["trafo_model"], "t")
+
+    def test_elmvac_is_a_separate_approximate_pq_mapping_and_affects_preflight(self):
+        model = base(); line(model); load(model, 1, 10, 2)
+        model["internationalConnections"] = [
+            {"id": "VAC1", "name": "Import", "bus": "B1", "pLoadMw": 15.0, "qLoadMvar": -3.0,
+             "mappingMode": "FIXED_PQ_LOAD_APPROXIMATION", "inService": True},
+            {"id": "VAC2", "name": "Out of service", "bus": "B1", "pLoadMw": 999.0, "qLoadMvar": 999.0,
+             "mappingMode": "FIXED_PQ_LOAD_APPROXIMATION", "inService": False},
+        ]
+        net, ids, unsupported, _ = convert(model)
+        self.assertIn("VAC1", ids["international"])
+        self.assertIn("VAC2", ids["international"])
+        self.assertEqual(len(net.load), 3)
+        self.assertAlmostEqual(net.load.at[ids["international"]["VAC1"], "p_mw"], 15.0)
+        self.assertAlmostEqual(net.load.at[ids["international"]["VAC1"], "q_mvar"], -3.0)
+        self.assertTrue(any(item["kind"] == "international_connection_behavior" for item in unsupported))
+        diagnostic = preflight(model, net, ids, unsupported)
+        self.assertEqual(diagnostic["internationalConnectionCount"], 2)
+        self.assertEqual(diagnostic["internationalConnectionsMapped"], 2)
+        self.assertEqual(diagnostic["internationalConnectionsInService"], 1)
+        self.assertAlmostEqual(diagnostic["internationalPmw"], 15.0)
+        self.assertAlmostEqual(diagnostic["internationalQmvar"], -3.0)
+        self.assertAlmostEqual(diagnostic["initialPImbalanceMw"], -25.0)
+
+    def test_approximate_station_participation_is_explicit_in_control_diagnostics(self):
+        model = base(3); line(model, 0, 1, r=1.0); line(model, 1, 2, r=1.0); load(model, 2, 20, 5)
+        model["generators"] = [
+            {"id": "G1", "bus": "B2", "pMw": 10, "qMvar": 0, "qMinMvar": -20, "qMaxMvar": 20, "inService": True},
+            {"id": "G2", "bus": "B2", "pMw": 30, "qMvar": 0, "qMinMvar": -20, "qMaxMvar": 20, "inService": True},
+        ]
+        model["controls"] = [{"id": "CTRL", "kind": "STATION", "inService": True, "controllerMode": "VOLTAGE",
+            "controlledBus": "B1", "controlledGeneratorIds": ["G1", "G2"], "controlledGeneratorShares": [0.25, 0.75],
+            "distributionMode": "ACTIVE_POWER_WEIGHTED_APPROXIMATION", "mappingStatus": "APPROXIMATE", "support": "PARTIAL",
+            "setpoint": 1.003, "droopEnabled": False}]
+        net, ids, _, _ = convert(model)
+        state = solve_with_controls(net, ids, model, {"algorithm": "nr", "calculate_voltage_angles": True,
+            "enforce_q_lims": True, "check_connectivity": True, "init": "auto", "max_iteration": 30, "numba": False}, 50)
+        self.assertEqual(state["appliedGroups"], 1)
+        self.assertEqual(state["approximateGroups"], 1)
+        self.assertEqual(state["controllers"][0]["distributionMode"], "ACTIVE_POWER_WEIGHTED_APPROXIMATION")
+
     def test_three_and_four_bus(self):
         for n in (3, 4):
             with self.subTest(n=n):

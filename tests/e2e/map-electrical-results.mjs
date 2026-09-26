@@ -18,6 +18,7 @@ try {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   await page.goto(`chrome-extension://${new URL(worker.url()).host}/workspace.html`);
   await page.locator('#fileInput').setInputFiles(resolve('tests/fixtures/map-electrical-network.json'));
   await page.locator('#v6Validation').waitFor({ timeout: 120000 });
@@ -31,7 +32,26 @@ try {
 
   await page.locator('#primaryTabs [data-primary="analysis"]').click();
   await page.locator('#v61Run').click();
-  await page.waitForFunction(() => !!window.YTBS_AnalysisState?.activeResult?.calculation, null, { timeout: 180000 });
+  try {
+    await page.waitForFunction(() => !!window.YTBS_AnalysisState?.activeResult?.calculation, null, { timeout: 30000 });
+  } catch (error) {
+    const state = await page.evaluate(() => ({
+      status: document.querySelector('#v61Status')?.textContent ?? '',
+      jobState: document.querySelector('#v61JobState')?.textContent ?? '',
+      calculationState: document.querySelector('#v61CalculationState')?.textContent ?? '',
+      hostHealth: document.querySelector('#v61HostHealth')?.textContent ?? '',
+      solverStatus: document.querySelector('#solverStatus')?.textContent ?? '',
+      browserSolver: window.YTBS_V3_TEST?.solver() ?? null,
+      calculationJob: window.YTBS_AnalysisState?.calculationJob ?? null,
+      result: window.YTBS_AnalysisState?.activeResult ? {
+        engine: window.YTBS_AnalysisState.activeResult.engine,
+        convergence: window.YTBS_AnalysisState.activeResult.convergence,
+        calculation: window.YTBS_AnalysisState.activeResult.calculation,
+      } : null,
+    }));
+    console.error(`Map-result BrowserApprox solve timed out: ${JSON.stringify({ state, errors })}`);
+    throw error;
+  }
   const emitted = await page.evaluate(() => {
     const result = window.YTBS_AnalysisState.activeResult;
     const bus = result.buses.find(item => item.id === 'B1');
