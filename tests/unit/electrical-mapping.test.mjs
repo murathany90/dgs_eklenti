@@ -19,7 +19,7 @@ function fixture() {
     ElmSym: table([{ FID: 'G', bus1: 'C2', pgini: 20, qgini: 1, usetp: 1.02, cQ_min: -10, cQ_max: 10, av_mode: 'constv', outserv: 0 }]),
     ElmGenStat: table([{ FID: 'SG', bus1: 'C3', pgini: 5, qgini: 2, av_mode: 'constq', outserv: 0 }]),
     ElmLod: table([{ FID: 'D', bus1: 'C3', plini: 10, qlini: 3, outserv: 0 }]),
-    ElmShnt: table([{ FID: 'S', bus1: 'C3', shtype: 2, qcapn: 2, ncapa: 1, ncapx: 3, outserv: 0 }]),
+    ElmShnt: table([{ FID: 'S', bus1: 'C3', ushnm: 10, shtype: 2, qcapn: 2, ncapa: 1, ncapx: 1, iTaps: 0, outserv: 0 }]),
     ElmScap: table([{ FID: 'SC', bus1: 'C1', bus2: 'C2', ucn: 110, bcap: 0.5, outserv: 0 }]),
     ElmXnet: table([{ FID: 'X', bus1: 'C1', usetp: 1, va_degree: 0, outserv: 0 }]),
     ElmCoup: table([{ FID: 'SW', bus1: 'C1', bus2: 'C2', on_off: 1, outserv: 0 }]),
@@ -66,7 +66,7 @@ test('generator PV/PQ, load and external grid retain source fields', () => {
 test('TypSym Q limits fill absent ElmSym limits with source finding', () => {
   const doc = fixture();
   doc.TypSym = table([{ FID: 'GT', Q_min: -6, Q_max: 7 }]);
-  doc.ElmSym = table([{ FID: 'G', bus1: 'C2', pgini: 20, qgini: 1, usetp: 1.02, av_mode: 'constv', typ_id: 'GT', outserv: 0 }]);
+  doc.ElmSym = table([{ FID: 'G', bus1: 'C2', pgini: 20, qgini: 1, usetp: 1.02, av_mode: 'constv', typ_id: 'GT', iqtype: 1, outserv: 0 }]);
   const net = map(doc);
   assert.equal(net.generators[0].qMinMvar, -6);
   assert.equal(net.generators[0].qMaxMvar, 7);
@@ -87,8 +87,10 @@ test('ElmStactrl source data is retained as mapped but not solved', () => {
   assert.equal(control.controlModeCode, 2);
   assert.equal(control.reactiveSharingModeCode, 1);
   assert.equal(control.droopEnabled, true);
-  assert.equal(control.droopRatedMvar, 80);
-  assert.equal(control.droopPercent, 4);
+  assert.equal(control.droopRatedMvar, null);
+  assert.equal(control.droopPercent, null);
+  assert.equal(control.droopRatedRaw, 80);
+  assert.equal(control.droopRawValue, 4);
   assert.equal(control.mappingStatus, 'MAPPED_BUT_NOT_SOLVED');
   assert.equal(net.modelCoverage.stationControlBus.available, 1);
 });
@@ -135,4 +137,43 @@ test('transformer winding connections are retained without inventing vector-grou
   assert.equal(net.transformers[0].phaseShiftDeg, null);
   assert.equal(net.modelCoverage.transformerWindingConnection.available, 1);
   assert.equal(net.modelCoverage.transformerPhaseAngle.available, 0);
+});
+
+test('PV limits, station controller, ComLdf and tapped shunt use verified source values', () => {
+  const doc = fixture();
+  doc.ElmSym = table([]);
+  doc.ElmGenStat = table([
+    { FID: 'SG1', bus1: 'C1', ngnum: 2, pgini: 20, qgini: 3, av_mode: 'constv', usetp: 1.02, outserv: 0, pQlimType: 'QL1' },
+    { FID: 'SG2', bus1: 'C2', ngnum: 1, pgini: 5, qgini: 4, av_mode: 'constv', usetp: 1.01, outserv: 0 },
+  ]);
+  doc.IntQlim = table([{ FID: 'QL1', 'cap_P:SIZEROW': 3, 'cap_P:0': 0, 'cap_P:1': 40, 'cap_P:2': 100,
+    'cap_Qmn:SIZEROW': 3, 'cap_Qmn:0': -10, 'cap_Qmn:1': -20, 'cap_Qmn:2': -40,
+    'cap_Qmx:SIZEROW': 3, 'cap_Qmx:0': 10, 'cap_Qmx:1': 20, 'cap_Qmx:2': 40 }]);
+  doc.ElmStactrl = table([{ FID: 'CTRL', outserv: 0, rembar: 'B2', selBus: 0, usetp: 1.03, i_ctrl: 0,
+    'psym:SIZEROW': 1, 'psym:0': 'SG1', i_droop: 0, imode: 0 }]);
+  doc.ElmShnt = table([{ FID: 'R', bus1: 'C3', ushnm: 420, shtype: 1, qrean: 250, ncapa: 2, ncapx: 2,
+    iTaps: 1, 'mTaps:SIZEROW': 3, 'mTaps:SIZECOL': 2, 'mTaps:0': 0, 'mTaps:1': 50, 'mTaps:2': 100 }]);
+  doc.ComLdf = table([{ FID: 'LDF', iopt_lim: 1, itrlx: 100, ictrlx: 50, errlf: 5, erreq: 0.2, iPbalancing: 3 }]);
+  const net = map(doc);
+  const controlledGenerator = net.generators.find(item => item.id === 'SG1');
+  const unresolvedPv = net.generators.find(item => item.id === 'SG2');
+  const controller = net.controls.find(item => item.kind === 'STATION');
+  assert.equal(controlledGenerator.pMw, 40);
+  assert.equal(controlledGenerator.qMvar, 6);
+  assert.equal(controlledGenerator.qMinMvar, -20);
+  assert.equal(controlledGenerator.qMaxMvar, 20);
+  assert.equal(controlledGenerator.qLimitSource, 'IntQlim.cap_Qmn/cap_Qmx@pgini');
+  assert.equal(unresolvedPv.controlMode, 'UNKNOWN');
+  assert.equal(unresolvedPv.qMvar, 4);
+  assert.equal(controller.controlledBus, 'B2');
+  assert.equal(controller.controllerMode, 'VOLTAGE');
+  assert.equal(controller.mappingStatus, 'SOLVED');
+  assert.equal(net.shunts[0].nominalKv, 420);
+  assert.equal(net.shunts[0].totalQAtCurrentStepMvar, 100);
+  assert.equal(net.shunts[0].qMvarPerStep, 50);
+  assert.equal(net.shunts[0].tapTableLossDataAvailable, false);
+  assert.equal(net.loadFlowSettings.enforceReactiveLimits, true);
+  assert.equal(net.loadFlowSettings.maxNewtonIterations, 100);
+  assert.equal(net.loadFlowSettings.maxOuterIterations, 50);
+  assert.equal(net.loadFlowSettings.activePowerBalancingMode, 'UNKNOWN');
 });

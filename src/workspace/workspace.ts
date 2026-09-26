@@ -216,6 +216,7 @@ solverPanel.innerHTML = `<div class="heading"><div><h2>Elektriksel Analiz</h2><s
   <div class="row"><div class="field"><label for="v61BusSearch">Bara adı veya kimliği ile ara</label><input id="v61BusSearch" type="search" placeholder="Örn. H4025 / İSTANBUL"></div><div class="field"><label for="v61BusSelect">Bara sonucu ve kullanılabilirlik nedeni</label><select id="v61BusSelect"><option value="">Bara seçin</option></select></div><div id="v61BusAvailability" class="notice" role="status">Bara seçilmedi.</div></div>
   <div id="v61Preflight" class="panel" hidden><div class="heading"><div><h3>AC Ön Kontrol Tanıları</h3><span class="sub">Model dönüştürmesinden alınan bağlantı ve kontrol özeti</span></div><details id="v61PreflightDetails"><summary>Yakınsamama Ayrıntıları</summary><div id="v61PreflightGrid" class="preflightGrid"></div><details><summary>Tanı JSON'u · teknik ayrıntı</summary><pre id="v61PreflightJson" class="rawpre"></pre></details></details></div></div>
   <section id="v61NonConvergence" class="notice bad" hidden></section><section id="v61DcSuccess" class="notice" hidden></section>
+  <section id="v61ConvergenceDiagnosis" class="panel" hidden><div class="heading"><div><h3>Yakınsama Tanısı</h3><span class="sub">Solver durumundan ayrı, tanı amaçlı ölçümler</span></div></div><div id="v61ConvergenceDiagnosisGrid" class="preflightGrid"></div><details><summary>Tanı JSON'u · teknik ayrıntı</summary><pre id="v61ConvergenceDiagnosisJson" class="rawpre"></pre></details></section>
   <details id="v61HistoryDetails"><summary>Son hesaplamalar</summary><ol id="v61History"></ol></details>
   <div class="row" style="margin-top:16px"><div class="field"><label for="v61Filter">Sonuç kapsamı</label><select id="v61Filter"><option value="all">Tümü</option><option value="bus">Baralar</option><option value="line">Hatlar</option><option value="transformer">Transformatörler</option><option value="generator">Üretim</option><option value="system">Sistem</option></select></div><div class="field grow"><label for="v61Search">Ekipman adı veya kimliği</label><input id="v61Search" type="search" placeholder="Ekipman adı veya kimliği ile ara"></div><span class="mini" id="v61ReferenceStatus">PowerFactory referansı yüklenmedi.</span></div>
   <div class="scrolltbl" id="v61Comparison">Sonuç bekleniyor.</div><div class="pager" id="v61Pager"></div>`;
@@ -600,6 +601,11 @@ function renderScope(): void {
 }
 
 function preflightEntries(d: ACPreflightDiagnostics): Array<[string, string]> {
+  const settings = d.loadFlowSettings ?? {};
+  const setting = (key: string): string => {
+    const item = settings[key] as { value?: unknown; source?: unknown; sourceValue?: unknown } | undefined;
+    return item ? `${String(item.value ?? 'UNKNOWN')} · ${String(item.source ?? 'UNKNOWN')}${item.sourceValue === null || item.sourceValue === undefined ? '' : ` (${String(item.sourceValue)})`}` : 'UNKNOWN';
+  };
   return [
     ['Toplam / servisteki bara', `${nf.format(d.modelCounts.bus)} / ${nf.format(d.inServiceBusCount)}`],
     ['Elektriksel ada', `${nf.format(d.electricalIslandCount)} · kaynaklı ${nf.format(d.islandsWithSlackCount)} · kaynaksız ${nf.format(d.islandsWithoutSlackCount)}`],
@@ -608,7 +614,11 @@ function preflightEntries(d: ACPreflightDiagnostics): Array<[string, string]> {
     ['PV / PQ bara', `${nf.format(d.pvBusCount)} / ${nf.format(d.pqBusCount)}`],
     ['Q sınırı eksik PV üretim ünitesi', `${nf.format(d.pvUnitsMissingQLimits)} / ${nf.format(d.pvUnitCount)}`],
     ['İstasyon kontrolü · serviste', `${nf.format(d.stationControlsInService ?? 0)} / ${nf.format(d.stationControlCount ?? 0)}`],
-    ['Uzak gerilim kontrolü · reaktif paylaşım · droop', `${nf.format(d.remoteVoltageControllerCount ?? 0)} / ${nf.format(d.reactiveSharingRecordCount ?? 0)} / ${nf.format(d.droopRecordCount ?? 0)}`],
+    ['Uzak kontrol toplam / uygulanan · paylaşım grubu uygulanan · droop uygulanan', `${nf.format(d.remoteVoltageControllerCount ?? 0)} / ${nf.format(d.remoteVoltageControllersApplied ?? 0)} · ${nf.format(d.reactiveSharingGroupsApplied ?? 0)} · ${nf.format(d.droopControllersApplied ?? 0)}`],
+    ['ElmGenStat Q-limit kapsamı', `${nf.format(d.elmGenStatQLimitCoverage?.available ?? 0)} / ${nf.format(d.elmGenStatQLimitCoverage?.total ?? 0)}`],
+    ['NR iterasyon üst sınırı', setting('maxNewtonIterations')],
+    ['Dış kontrol iterasyonu üst sınırı', setting('maxOuterIterations')],
+    ['Q-limit ayarı', setting('enforceReactiveLimits')],
     ['Geçersiz gerilim ayarı', nf.format(d.pvUnitsInvalidVoltageSetpoint)],
     ['Gerilim ayarı aralığı', `${fmt(d.minVmSetpointPu, 4)}–${fmt(d.maxVmSetpointPu, 4)} p.u.`],
     ['Trafo sınır dışı / nötrden >10 kademe', `${nf.format(d.transformerTapOutsideDeclaredLimits)} / ${nf.format(d.transformerTapDeviationAbsGreaterThan10)}`],
@@ -618,9 +628,36 @@ function preflightEntries(d: ACPreflightDiagnostics): Array<[string, string]> {
     ['Açık / kapalı anahtar', `${nf.format(d.openSwitchCount)} / ${nf.format(d.closedSwitchCount)}`],
     ['Eşlenmeyen eleman', nf.format(d.elementsNotMapped)],
     ['Sıfır empedans / küçük X / negatif X', `${nf.format(d.zeroImpedanceCount)} / ${nf.format(d.verySmallReactanceCount)} / ${nf.format(d.negativeReactanceCount)}`],
-    ['Kompanzasyonlu aday net X ≤ 0 yolu', nf.format(d.candidateNonPositiveCompensatedPathCount)],
+    ['Seri kompanzasyon yolu · hassas / çözümlenemeyen', `${nf.format(d.seriesCompensation?.sensitiveCount ?? 0)} / ${nf.format(d.seriesCompensation?.unresolvedCount ?? 0)}`],
     ['Dış şebeke kaynağı / dönüştürme bildirimi', `${nf.format(d.externalGridCount)} / ${nf.format(d.unsupportedConversionCount)}`],
   ];
+}
+
+function renderConvergenceDiagnosis(result: ResultSet | null): void {
+  const section = solverPanel.querySelector<HTMLElement>('#v61ConvergenceDiagnosis')!;
+  const grid = solverPanel.querySelector<HTMLElement>('#v61ConvergenceDiagnosisGrid')!;
+  const json = solverPanel.querySelector<HTMLElement>('#v61ConvergenceDiagnosisJson')!;
+  const d = result?.calculationDiagnostics;
+  if (!d || result?.summary.mode !== 'AC') { section.hidden = true; grid.replaceChildren(); json.textContent = ''; return; }
+  section.hidden = false;
+  const outer = d.outerControl as { unsatisfiedGroups?: unknown[] } | null | undefined;
+  const unavailable = 'Elde edilemedi';
+  const entries: Array<[string, string]> = [
+    ['Toplam iç Newton–Raphson iterasyonu', d.innerIterations === null ? unavailable : nf.format(d.innerIterations)],
+    ['Dış kontrol iterasyonu', d.outerIterations === null ? unavailable : nf.format(d.outerIterations)],
+    ['PV → PQ dönüşümü', d.pvToPqCount === null ? unavailable : nf.format(d.pvToPqCount)],
+    ['Qmin / Qmax sınırında', `${d.qMinHits === null || d.qMinHits === undefined ? unavailable : nf.format(d.qMinHits)} / ${d.qMaxHits === null || d.qMaxHits === undefined ? unavailable : nf.format(d.qMaxHits)}`],
+    ['Sağlanmayan gerilim kontrol grubu', nf.format(outer?.unsatisfiedGroups?.length ?? 0)],
+    ['En büyük |ΔP|', d.maxPMismatchMw === null ? unavailable : `${fmt(d.maxPMismatchMw, 6)} MW`],
+    ['En büyük |ΔQ|', d.maxQMismatchMvar === null ? unavailable : `${fmt(d.maxQMismatchMvar, 6)} MVAr`],
+    ['Gerilim aralığı', d.voltagePuMin === null || d.voltagePuMax === null ? unavailable : `${fmt(d.voltagePuMin, 5)}–${fmt(d.voltagePuMax, 5)} p.u.`],
+    ['Artık hesabı', d.residualStatus === 'AVAILABLE' ? 'Tanı için kullanılabilir' : `Kullanılamıyor · ${d.residualReason ?? ''}`],
+  ];
+  grid.replaceChildren(...entries.map(([label, value]) => {
+    const cell = document.createElement('div'); const title = document.createElement('small'); title.textContent = label;
+    const strong = document.createElement('strong'); strong.textContent = value; cell.append(title, strong); return cell;
+  }));
+  json.textContent = JSON.stringify(d, null, 2);
 }
 function renderPreflight(diagnostics: ACPreflightDiagnostics | null): void {
   const container = solverPanel.querySelector<HTMLElement>('#v61Preflight')!;
@@ -639,6 +676,7 @@ function resultCategory(record: ComparisonRecord): string { return record.catego
 function renderComparison(): void {
   syncMapResults();
   const result = resultMatchesSelection(analysisState.activeResult) ? analysisState.activeResult : null;
+  renderConvergenceDiagnosis(result);
   const nonConverged = analysisState.activeEngine === 'pandapower' && analysisState.activeMode === 'AC' && result?.convergence === 'NON_CONVERGED';
   const nonConvergenceNotice = solverPanel.querySelector<HTMLElement>('#v61NonConvergence')!;
   const dcNotice = solverPanel.querySelector<HTMLElement>('#v61DcSuccess')!;
@@ -648,10 +686,11 @@ function renderComparison(): void {
     const summary = result.summary;
     const p = result.preflight;
     const qMissing = p ? `${nf.format(p.pvUnitsWithQLimits)}/${nf.format(p.pvUnitCount)} PV ünitesinde tam Q sınırı` : 'Q sınırı kapsamı yok';
-    const controls = p ? `${nf.format(p.unsupportedOrUnsolvedControlCount)} çözülmeyen gerilim kontrolü` : 'Kontrol kapsamı yok';
+    const controls = p ? `${nf.format(p.unsupportedOrUnsolvedControlCount)} çözülmeyen kontrol kaydı` : 'Kontrol kapsamı yok';
     const phase = p ? `${nf.format(p.transformerPhaseAngleCoverage?.available ?? Math.max(0, p.modelCounts.transformer - p.transformerPhaseAngleMissing))}/${nf.format(p.transformerPhaseAngleCoverage?.total ?? p.modelCounts.transformer)} trafoda faz bilgisi` : 'Trafo faz bilgisi yok';
     const reactance = p ? `${nf.format(p.negativeReactanceCount)} negatif X · ${nf.format(p.candidateNonPositiveCompensatedPathCount)} kompanzasyonlu X≤0 aday yolu` : 'Empedans tanısı yok';
-    nonConvergenceNotice.innerHTML = `<strong>AC çözümü ${result.iterations ?? 30} Newton iterasyonunda yakınsamadı. Sayısal AC sonuçları gösterilmiyor.</strong><br>Model: ${nf.format(summary.modelBusCount ?? p?.modelCounts.bus ?? 0)} bara · ${nf.format(summary.modelLineCount ?? p?.modelCounts.line ?? 0)} hat · ${nf.format(summary.modelTransformerCount ?? p?.modelCounts.transformer ?? 0)} transformatör.<br><b>İncelenmesi gereken model/kontrol eksikleri:</b> ${safe(qMissing)}; ${safe(controls)}; ${safe(phase)}; ${safe(reactance)}.`;
+    const iterations = result.iterations === null ? 'İç NR iterasyon sayısı elde edilemedi' : `${nf.format(result.iterations)} iç NR iterasyonu`;
+    nonConvergenceNotice.innerHTML = `<strong>AC çözümü yakınsamadı (${safe(iterations)}). Sayısal AC sonuçları gösterilmiyor.</strong><br>Model: ${nf.format(summary.modelBusCount ?? p?.modelCounts.bus ?? 0)} bara · ${nf.format(summary.modelLineCount ?? p?.modelCounts.line ?? 0)} hat · ${nf.format(summary.modelTransformerCount ?? p?.modelCounts.transformer ?? 0)} transformatör.<br><b>İncelenmesi gereken model/kontrol eksikleri:</b> ${safe(qMissing)}; ${safe(controls)}; ${safe(phase)}; ${safe(reactance)}.`;
     comparison.innerHTML = '';
     return;
   }
@@ -909,7 +948,7 @@ async function executeSelectedCalculation(key: CalculationKey, engine: Engine, m
     setJobState(terminalState, result.convergence === 'NON_CONVERGED' ? 'AC çözümü yakınsamadı.' : `${mode} hesap tamamlandı · ${convergenceLabel(result)}.`);
     if (result.convergence !== 'CONVERGED') analysisState.calculationState = 'NON_CONVERGED';
     const kind = result.convergence === 'CONVERGED' ? result.validation === 'COMPLETE_UNVALIDATED' ? 'warn' : 'info' : result.convergence === 'NON_CONVERGED' ? 'bad' : 'warn';
-    updateStatus(result.convergence === 'NON_CONVERGED' ? 'AC çözümü 30 Newton iterasyonunda yakınsamadı; sayısal AC sonuçları gösterilmiyor.' : `${mode} yük akışı ${convergenceLabel(result).toLocaleLowerCase('tr-TR')}.`, kind);
+    updateStatus(result.convergence === 'NON_CONVERGED' ? 'AC çözümü yakınsamadı; sayısal AC sonuçları gösterilmiyor. Ayrıntılar Yakınsama Tanısı bölümünde.' : `${mode} yük akışı ${convergenceLabel(result).toLocaleLowerCase('tr-TR')}.`, kind);
     renderMetadata(); renderPreflight(analysisState.preflight); renderComparison(); renderBusAvailability(); renderScenario();
   } catch (error) {
     if (!selectionIsCurrent()) return;
@@ -1096,14 +1135,14 @@ if (legacyExperimentalRun) {
 document.querySelector('#v54GoAnalysis')?.addEventListener('click', () => navigate('analysis'));
 document.querySelector('#v54GoScenario')?.addEventListener('click', () => navigate('scenario'));
 
-document.title = 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.4';
+document.title = 'Grid Analyzer | Şebeke Analiz Sistemi v6.1.5';
 const appTitle = document.querySelector<HTMLElement>('.apphead h1');
 if (appTitle) appTitle.textContent = 'Grid Analyzer';
 const brandLogo = document.querySelector<HTMLElement>('.brandlogo');
 if (brandLogo) brandLogo.textContent = 'GA';
 const appVersion = document.querySelector<HTMLElement>('.brand small');
 if (appVersion) appVersion.textContent = 'Şebeke Analiz Sistemi';
-if (footer) footer.textContent = 'Grid Analyzer · Chrome MV3 · v6.1.4';
+if (footer) footer.textContent = 'Grid Analyzer · Chrome MV3 · v6.1.5';
 renderMetadata(); renderScope(); renderScenario(); presentationSweep();
 
 void getRecord<{ file: File; name: string }>('models', 'pending').then(async record => {

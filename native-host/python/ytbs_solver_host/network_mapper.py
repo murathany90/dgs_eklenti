@@ -2,6 +2,7 @@
 import math
 import time
 import pandapower as pp
+from .series_compensation import series_compensation_paths
 
 
 def _number(value):
@@ -102,20 +103,36 @@ def convert(model):
             name=[item.get("name") for item in items], in_service=[item.get("inService") is True for item in items])
         ids["trafo"].update((item["id"], int(index)) for item, index in zip(items, indices))
 
-    valid_pv, valid_pq = [], []
+    settings = model.get("loadFlowSettings") if isinstance(model.get("loadFlowSettings"), dict) else {}
+    net["ytbs_load_flow_settings"] = settings
+    station_controls = [item for item in model.get("controls", []) if item.get("kind") == "STATION" and item.get("inService") is True]
+    net["ytbs_station_controls"] = station_controls
+    solved_station_members = {generator_id for control in station_controls if control.get("mappingStatus") == "SOLVED"
+        and control.get("controllerMode") == "VOLTAGE" and control.get("droopEnabled") is False
+        for generator_id in control.get("controlledGeneratorIds", [])}
+    all_station_members = {generator_id for control in station_controls for generator_id in control.get("controlledGeneratorIds", [])}
+
+    valid_pv, valid_pq, valid_station = [], [], []
     for item in model.get("generators", []):
         if not endpoints(item, "bus") or not _number(item.get("pMw")):
             missing("generator", item, "missing bus or P")
             continue
         mode = item.get("controlMode")
-        if mode == "PV" and _positive(item.get("vmPu")):
+        has_q_limits = _number(item.get("qMinMvar")) and _number(item.get("qMaxMvar")) and item["qMinMvar"] <= item["qMaxMvar"]
+        if item.get("id") in solved_station_members and has_q_limits and _number(item.get("qMvar")):
+            valid_station.append(item)
+        elif item.get("id") in all_station_members:
+            if _number(item.get("qMvar")):
+                valid_pq.append(item)
+            missing("station_control", item, "station control unresolved; retained as fixed-q snapshot and excluded from PV regulation")
+        elif mode == "PV" and _positive(item.get("vmPu")) and has_q_limits:
             valid_pv.append(item)
-            if not _number(item.get("qMinMvar")) or not _number(item.get("qMaxMvar")):
-                missing("generator_q_limits", item, "PV Q limits unavailable")
-        elif mode == "PQ" and _number(item.get("qMvar")):
+        elif _number(item.get("qMvar")):
             valid_pq.append(item)
+            if mode == "PV":
+                missing("generator_control_mode", item, "PV request has no finite ordered Q bounds; retained as fixed-q snapshot")
         else:
-            missing("generator", item, "unknown control mode or missing setpoint/Q")
+            missing("generator", item, "unknown control mode or missing Q snapshot; element not numerically guessed")
         if item.get("remoteControlBus") or item.get("participationFactor") or item.get("droop"):
             missing("generator_control", item, "remote regulation, Q sharing or droop unsupported")
 
@@ -127,10 +144,19 @@ def convert(model):
             name=[item.get("name") for item in valid_pv], in_service=[item.get("inService") is True for item in valid_pv])
         ids["gen"].update((item["id"], int(index)) for item, index in zip(valid_pv, indices))
     if valid_pq:
+        # pandapower clips SGEN q_mvar to min/max when enforce_q_lims is enabled.
+        # Preserve fixed-PQ source qgini; limits belong on PV gens or controlled actuators only.
         indices = pp.create_sgens(net, [ids["bus"][item["bus"]] for item in valid_pq],
             p_mw=[item["pMw"] for item in valid_pq], q_mvar=[item["qMvar"] for item in valid_pq],
             name=[item.get("name") for item in valid_pq], in_service=[item.get("inService") is True for item in valid_pq])
         ids["sgen"].update((item["id"], int(index)) for item, index in zip(valid_pq, indices))
+
+    if valid_station:
+        indices = pp.create_sgens(net, [ids["bus"][item["bus"]] for item in valid_station],
+            p_mw=[item["pMw"] for item in valid_station], q_mvar=[item["qMvar"] for item in valid_station],
+            min_q_mvar=[item["qMinMvar"] for item in valid_station], max_q_mvar=[item["qMaxMvar"] for item in valid_station],
+            name=[item.get("name") for item in valid_station], in_service=[item.get("inService") is True for item in valid_station])
+        ids["sgen"].update((item["id"], int(index)) for item, index in zip(valid_station, indices))
 
     for item in model.get("externalGrids", []):
         if not endpoints(item, "bus") or not _positive(item.get("vmPu")):
@@ -159,8 +185,14 @@ def convert(model):
         if not endpoints(item, "bus") or not _number(item.get("qMvarPerStep")) or not _number(item.get("currentStep")):
             missing("shunt", item, "missing bus, Q or step")
             continue
-        ids["shunt"][item["id"]] = pp.create_shunt(net, ids["bus"][item["bus"]], q_mvar=item["qMvarPerStep"], step=int(item["currentStep"]),
-            max_step=int(item["steps"]) if _number(item.get("steps")) else 1, name=item.get("name"), in_service=item.get("inService") is True)
+        kwargs = {"q_mvar": item["qMvarPerStep"], "step": int(item["currentStep"]),
+            "max_step": int(item["steps"]) if _number(item.get("steps")) else 1,
+            "name": item.get("name"), "in_service": item.get("inService") is True}
+        if _positive(item.get("nominalKv")):
+            kwargs["vn_kv"] = item["nominalKv"]
+        else:
+            missing("shunt_voltage_base", item, "ushnm unavailable; pandapower uses connected bus voltage base")
+        ids["shunt"][item["id"]] = pp.create_shunt(net, ids["bus"][item["bus"]], **kwargs)
 
     valid_switches = []
     for item in model.get("switches", []):
@@ -182,6 +214,7 @@ def convert(model):
         zbase = item["nominalKv"] ** 2 / net.sn_mva
         ids["impedance"][item["id"]] = pp.create_impedance(net, ids["bus"][item["fromBus"]], ids["bus"][item["toBus"]],
             rft_pu=0.0, xft_pu=item["xOhm"] / zbase, sn_mva=net.sn_mva, name=item.get("name"), in_service=item.get("inService") is True)
+    net["ytbs_series_compensation_paths"] = series_compensation_paths(model)
     return net, ids, unsupported, (time.perf_counter() - started) * 1000
 
 
@@ -242,9 +275,12 @@ def preflight(model, net=None, ids=None, unsupported=None):
     loads = [item for item in model.get("loads", []) if item.get("id") in ids["load"] and item.get("inService") is True]
     total_gen_mw = sum(num(item.get("pMw")) or 0.0 for item in in_service_gens)
     total_load_mw = sum(num(item.get("pMw")) or 0.0 for item in loads)
-    pv_buses = {item.get("bus") for item in in_service_gens if item.get("controlMode") == "PV" and item.get("bus") in bus_ids}
+    station_member_ids = {generator_id for control in model.get("controls", []) if control.get("kind") == "STATION"
+        and control.get("inService") is True for generator_id in control.get("controlledGeneratorIds", [])}
+    pv_buses = {item.get("bus") for item in in_service_gens if item.get("controlMode") == "PV"
+        and item.get("id") not in station_member_ids and item.get("bus") in bus_ids}
     pq_buses = bus_ids - pv_buses - slack_buses
-    pv_units = [item for item in in_service_gens if item.get("controlMode") == "PV"]
+    pv_units = [item for item in in_service_gens if item.get("controlMode") == "PV" and item.get("id") not in station_member_ids]
     q_missing_pv = sum(not (_number(item.get("qMinMvar")) and _number(item.get("qMaxMvar"))) for item in pv_units)
     valid_vm = [item["vmPu"] for item in pv_units if _number(item.get("vmPu")) and 0.5 <= item["vmPu"] <= 1.5]
     invalid_vm = sum(not (_number(item.get("vmPu")) and 0.5 <= item["vmPu"] <= 1.5) for item in pv_units)
@@ -294,20 +330,8 @@ def preflight(model, net=None, ids=None, unsupported=None):
         kv, x = num(item.get("nominalKv")), num(item.get("xOhm"))
         if kv and x is not None and 0 < abs(x * 100.0 / (kv * kv)) < 1e-5:
             very_small_x += 1
-    by_pair = {}
-    def pair_key(item):
-        a, b = item.get("fromBus"), item.get("toBus")
-        return tuple(sorted((a, b))) if isinstance(a, str) and isinstance(b, str) else None
-    for item in active_lines:
-        pair = pair_key(item)
-        if pair is None: continue
-        by_pair.setdefault(pair, {"lineX": 0.0, "seriesX": 0.0, "hasSeries": False})["lineX"] += num(item.get("xOhm")) or 0.0
-    for item in series:
-        pair = pair_key(item)
-        if pair is None: continue
-        by_pair.setdefault(pair, {"lineX": 0.0, "seriesX": 0.0, "hasSeries": False})["seriesX"] += num(item.get("xOhm")) or 0.0
-        by_pair[pair]["hasSeries"] = True
-    nonpositive_compensated_paths = sum(entry["hasSeries"] and entry["lineX"] + entry["seriesX"] <= 0 for entry in by_pair.values())
+    compensation_paths = series_compensation_paths(model)
+    nonpositive_compensated_paths = compensation_paths["sensitiveCount"]
 
     def non_finite(value):
         if isinstance(value, float): return not math.isfinite(value)
@@ -317,6 +341,26 @@ def preflight(model, net=None, ids=None, unsupported=None):
     non_finite_count = non_finite(model)
     ext_count = sum(item.get("inService") is True and item.get("id") in ids["ext_grid"] for item in model.get("externalGrids", []))
     winding_missing = sum(not (item.get("hvWindingConnection") and item.get("lvWindingConnection")) for item in trafos)
+    load_flow = model.get("loadFlowSettings") if isinstance(model.get("loadFlowSettings"), dict) else {}
+    effective_settings = {
+        "enforceReactiveLimits": {"value": load_flow.get("enforceReactiveLimits") if isinstance(load_flow.get("enforceReactiveLimits"), bool) else True,
+            "source": "ComLdf.iopt_lim" if isinstance(load_flow.get("enforceReactiveLimits"), bool) else "FALLBACK", "sourceValue": load_flow.get("rawValues", {}).get("iopt_lim")},
+        "maxNewtonIterations": {"value": load_flow.get("maxNewtonIterations") if isinstance(load_flow.get("maxNewtonIterations"), int) else 30,
+            "source": "ComLdf.itrlx" if isinstance(load_flow.get("maxNewtonIterations"), int) else "FALLBACK", "sourceValue": load_flow.get("rawValues", {}).get("itrlx")},
+        "maxOuterIterations": {"value": load_flow.get("maxOuterIterations") if isinstance(load_flow.get("maxOuterIterations"), int) else 10,
+            "source": "ComLdf.ictrlx" if isinstance(load_flow.get("maxOuterIterations"), int) else "FALLBACK", "sourceValue": load_flow.get("rawValues", {}).get("ictrlx")},
+        "nodalTolerance": {"value": None, "source": "UNKNOWN", "sourceValue": load_flow.get("nodalToleranceRaw")},
+        "modelEquationTolerance": {"value": None, "source": "UNKNOWN", "sourceValue": load_flow.get("modelEquationToleranceRaw")},
+        "activePowerBalancingMode": {"value": "UNKNOWN", "source": "UNKNOWN", "sourceValue": load_flow.get("activePowerBalancingModeCode")},
+    }
+    pv_with_limits = sum(_number(item.get("qMinMvar")) and _number(item.get("qMaxMvar")) for item in pv_units)
+    elm_gen_stat = [item for item in model.get("generators", []) if item.get("inService") is True
+        and item.get("sourceRefs", {}).get("powerFactoryClass") == "ElmGenStat"]
+    elm_gen_stat_q_coverage = sum(_number(item.get("qMinMvar")) and _number(item.get("qMaxMvar")) for item in elm_gen_stat)
+    applied_station_controls = [item for item in station_controls_in_service if item.get("mappingStatus") == "SOLVED"
+        and item.get("controllerMode") == "VOLTAGE"]
+    applied_share_groups = [item for item in applied_station_controls if len(item.get("controlledGeneratorIds") or []) > 1
+        and len(item.get("controlledGeneratorShares") or []) == len(item.get("controlledGeneratorIds") or [])]
 
     return {
         "modelCounts": {"bus": len(model.get("buses", [])), "line": len(model.get("lines", [])), "transformer": len(trafos), "generator": len(model.get("generators", []))},
@@ -330,6 +374,8 @@ def preflight(model, net=None, ids=None, unsupported=None):
         "initialPImbalanceMw": total_gen_mw - total_load_mw,
         "pvBusCount": len(pv_buses), "pqBusCount": len(pq_buses), "pvUnitCount": len(pv_units),
         "pvUnitsMissingQLimits": q_missing_pv, "pvUnitsWithQLimits": len(pv_units) - q_missing_pv,
+        "pvUnitsWithQLimitsCount": int(pv_with_limits),
+        "elmGenStatQLimitCoverage": {"available": int(elm_gen_stat_q_coverage), "total": len(elm_gen_stat)},
         "pvUnitsInvalidVoltageSetpoint": invalid_vm,
         "minVmSetpointPu": min(valid_vm) if valid_vm else None, "maxVmSetpointPu": max(valid_vm) if valid_vm else None,
         "transformerTapOutsideDeclaredLimits": taps_outside, "transformerTapDeviationAbsGreaterThan10": taps_extreme,
@@ -339,12 +385,15 @@ def preflight(model, net=None, ids=None, unsupported=None):
         "transformerWindingConnectionCoverage": {"total": len(trafos), "available": sum(bool(item.get("hvWindingConnection") and item.get("lvWindingConnection")) for item in trafos)},
         "unsupportedOrUnsolvedControlCount": unsupported_controls,
         "stationControlCount": len(station_controls), "stationControlsInService": len(station_controls_in_service),
-        "remoteVoltageControllerCount": len(remote_voltage_controls), "reactiveSharingRecordCount": len(reactive_sharing_records),
+        "remoteVoltageControllerCount": len(remote_voltage_controls), "remoteVoltageControllersApplied": len(applied_station_controls),
+        "reactiveSharingRecordCount": len(reactive_sharing_records), "reactiveSharingGroupsApplied": len(applied_share_groups),
         "droopRecordCount": len(droop_records),
+        "droopControllersApplied": 0,
         "openSwitchCount": switch_open, "closedSwitchCount": switch_closed,
         "zeroImpedanceCount": int(impedance_zero), "nonFiniteValueCount": int(non_finite_count),
         "negativeReactanceCount": int(negative_x), "verySmallReactanceCount": int(very_small_x),
         "candidateNonPositiveCompensatedPathCount": int(nonpositive_compensated_paths),
-        "candidatePathRule": "Direct bus-pair sum of mapped line X and series-compensator X; screening indicator, not a network reduction.",
+        "seriesCompensation": compensation_paths,
+        "loadFlowSettings": effective_settings,
         "unsupportedConversionCount": len(unsupported),
     }

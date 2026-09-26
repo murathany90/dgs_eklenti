@@ -90,12 +90,14 @@ try {
   await page.locator('#v61Run').click();
   await page.waitForFunction(() => {
     const status = document.querySelector('#v61Status')?.textContent ?? '';
-    return /AC çözümü 30 Newton iterasyonunda yakınsamadı|Chrome’a kayıtlı değil|izinli değil|beklenmedik biçimde kapandı|uyumlu değil|zaman aşımına uğradı/.test(status);
+    return /AC çözümü yakınsamadı|Chrome’a kayıtlı değil|izinli değil|beklenmedik biçimde kapandı|uyumlu değil|zaman aşımına uğradı/.test(status);
   }, null, { timeout: 600000 });
   const acStatus = await page.locator('#v61Status').innerText();
-  if (!acStatus.includes('AC çözümü 30 Newton iterasyonunda yakınsamadı')) throw Error(`Native host AC did not return the default AC result: ${acStatus}`);
+  if (!acStatus.includes('AC çözümü yakınsamadı')) throw Error(`Native host AC did not return a non-converged AC result: ${acStatus}`);
   const acSummary = await page.locator('#v61NonConvergence').innerText();
-  if (!acSummary.includes('86.479') || !acSummary.includes('2.382') || !acSummary.includes('30')) throw Error(`Non-convergence model counts missing: ${acSummary}`);
+  if (!acSummary.includes('86.479') || !acSummary.includes('2.382')) throw Error(`Non-convergence model counts missing: ${acSummary}`);
+  const acDiagnosis = await page.locator('#v61ConvergenceDiagnosis').innerText();
+  if (!acDiagnosis.includes('Yakınsama Tanısı') || !acDiagnosis.includes('Toplam iç Newton–Raphson iterasyonu')) throw Error(`AC diagnostic panel is missing: ${acDiagnosis}`);
   if ((await page.locator('#v61Comparison').innerText()).trim()) throw Error('Non-converged AC must not show numeric comparison rows');
   console.log(`Native host full DGS AC: ${acStatus} · ${acSummary}`);
   console.log(`Native AC phases: ${JSON.stringify(await page.evaluate(() => window.__nativeMilestones))}`);

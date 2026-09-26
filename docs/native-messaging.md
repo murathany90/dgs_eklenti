@@ -1,4 +1,4 @@
-# Grid Analyzer Yerel Hesap Motoru · v6.1.4
+# Grid Analyzer Yerel Hesap Motoru · v6.1.5
 
 Protocol version: **1.0**. Host name: `com.ytbs.powerfactory.solver`. The Python package pins pandapower **3.5.5**. The installer creates a virtual environment, installs the package and registers the generated executable `ytbs-solver-host.exe` in `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.ytbs.powerfactory.solver`. It writes `com.ytbs.powerfactory.solver.json` with the current extension ID in `allowed_origins`; it does not create a `.cmd` launcher.
 

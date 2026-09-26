@@ -31,11 +31,21 @@ export interface ACPreflightDiagnostics {
   transformerPhaseAngleMissing: number; transformerWindingConnectionMissing: number;
   unsupportedOrUnsolvedControlCount: number; openSwitchCount: number; closedSwitchCount: number;
   stationControlCount?: number; stationControlsInService?: number; remoteVoltageControllerCount?: number;
-  reactiveSharingRecordCount?: number; droopRecordCount?: number;
+  remoteVoltageControllersApplied?: number; reactiveSharingRecordCount?: number; reactiveSharingGroupsApplied?: number; droopRecordCount?: number; droopControllersApplied?: number;
+  elmGenStatQLimitCoverage?: { available: number; total: number };
   transformerPhaseAngleCoverage?: { total: number; available: number };
   transformerWindingConnectionCoverage?: { total: number; available: number };
   zeroImpedanceCount: number; nonFiniteValueCount: number; negativeReactanceCount: number; verySmallReactanceCount: number;
-  candidateNonPositiveCompensatedPathCount: number; candidatePathRule: string; unsupportedConversionCount: number;
+  candidateNonPositiveCompensatedPathCount: number; candidatePathRule?: string; unsupportedConversionCount: number;
+  seriesCompensation?: { count: number; sensitiveCount: number; unresolvedCount: number; paths: Array<Record<string, unknown>>; rule: string };
+  loadFlowSettings?: Record<string, unknown>;
+}
+export interface CalculationDiagnostics {
+  diagnosticOnly: true; innerIterations: number | null; outerIterations: number | null;
+  maxPMismatchMw: number | null; maxQMismatchMvar: number | null; voltagePuMin: number | null; voltagePuMax: number | null;
+  qMinHits?: number | null; qMaxHits?: number | null; pvToPqCount: number | null;
+  residualStatus: 'AVAILABLE' | 'UNAVAILABLE'; residualReason: string | null;
+  outerControl?: Record<string, unknown> | null; error?: string | null;
 }
 export interface UnsupportedResult { kind: string; id: string; reason: string }
 export interface ResultSet {
@@ -46,6 +56,7 @@ export interface ResultSet {
   buses: BusResult[]; branches: BranchResult[]; transformers: TransformerResult[]; generators: GeneratorResult[];
   externalGrids: ExternalGridResult[]; losses: Array<{ id: string; pMw: number | null; qMvar: number | null }>;
   summary: NetworkSummary; preflight?: ACPreflightDiagnostics;
+  calculationDiagnostics?: CalculationDiagnostics;
   performance?: { conversionMs: number; solveMs: number; serializationMs?: number };
   resultAvailability: ResultAvailability;
   calculation?: CalculationMetadata;
